@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "TimeFit",
+    "slug": "timefit-mobile",
+    "scheme": "timefit",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "plugins": ["expo-router"],
+    "experiments": { "typedRoutes": true }
+  }
+}

@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String           @id @default(cuid())
+  email           String           @unique
+  name            String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  devices         Device[]
+  places          Place[]
+  preferences     Preference[]
+  recommendations Recommendation[]
+  routines        Routine[]
+  trips           Trip[]
+  notifications   Notification[]
+}
+
+model Device {
+  id         String   @id @default(cuid())
+  userId     String
+  platform   String
+  pushToken  String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Place {
+  id         String   @id @default(cuid())
+  userId     String
+  label      String
+  lat        Float
+  lng        Float
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Preference {
+  id             String   @id @default(cuid())
+  userId         String
+  prepMinutes    Int      @default(10)
+  bufferMinutes  Int      @default(8)
+  quietArrival   Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Recommendation {
+  id                 String                @id @default(cuid())
+  userId             String
+  arrivalAt          DateTime
+  departureAt        DateTime
+  totalEstimatedMin  Int
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  routes             RecommendationRoute[]
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model RecommendationRoute {
+  id                String   @id @default(cuid())
+  recommendationId  String
+  provider          String
+  mode              String
+  durationMin       Int
+  score             Float?
+  createdAt         DateTime @default(now())
+
+  recommendation Recommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
+
+  @@index([recommendationId])
+}
+
+model Routine {
+  id               String   @id @default(cuid())
+  userId           String
+  title            String
+  originPlaceId    String?
+  destinationPlaceId String?
+  arrivalRule      String
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Trip {
+  id                String   @id @default(cuid())
+  userId            String
+  routineId         String?
+  recommendationId  String?
+  status            String   @default("planned")
+  departureAt       DateTime?
+  arrivalAt         DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Notification {
+  id           String   @id @default(cuid())
+  userId       String
+  tripId       String?
+  channel      String   @default("push")
+  status       String   @default("scheduled")
+  scheduledAt  DateTime
+  sentAt       DateTime?
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
