@@ -5,6 +5,9 @@ export const tokens = {
     text: '#E6EDF8',
     subtext: '#A8B3C7',
     primary: '#3DDC97',
+    mint: '#3DDC97',
+    orange: '#FF9F43',
+    red: '#FF5D73',
   },
   spacing: {
     xs: 4,
