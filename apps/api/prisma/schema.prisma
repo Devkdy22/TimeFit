@@ -72,6 +72,7 @@ model Recommendation {
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
   routes             RecommendationRoute[]
+  trips              Trip[]
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -109,19 +110,22 @@ model Routine {
 }
 
 model Trip {
-  id                String   @id @default(cuid())
-  userId            String
-  routineId         String?
-  recommendationId  String?
-  status            String   @default("planned")
-  departureAt       DateTime?
-  arrivalAt         DateTime?
-  createdAt         DateTime @default(now())
-  updatedAt         DateTime @updatedAt
+  id                   String         @id @default(cuid())
+  userId               String
+  recommendationId     String
+  status               String         @default("preparing")
+  startedAt            DateTime
+  expectedArrivalAt    DateTime?
+  plannedDurationMin   Int?
+  delayOffsetMin       Int            @default(0)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user            User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  recommendation  Recommendation @relation(fields: [recommendationId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([recommendationId])
 }
 
 model Notification {
@@ -137,4 +141,15 @@ model Notification {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+}
+
+model TrafficSnapshot {
+  id              String   @id @default(cuid())
+  key             String
+  congestionIndex Float
+  ttlSeconds      Int
+  expiresAt       DateTime
+  createdAt       DateTime @default(now())
+
+  @@index([key, expiresAt])
 }
