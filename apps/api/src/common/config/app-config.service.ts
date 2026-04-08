@@ -34,8 +34,44 @@ export class AppConfigService {
     return this.configService.get('KAKAO_API_KEY', { infer: true });
   }
 
+  get trafficApiKey() {
+    return this.configService.get('TRAFFIC_API_KEY', { infer: true });
+  }
+
+  get weatherApiKey() {
+    return this.configService.get('WEATHER_API_KEY', { infer: true });
+  }
+
+  get seoulApiKey() {
+    return this.configService.get('SEOUL_API_KEY', { infer: true });
+  }
+
+  get seoulSubwayApiKey() {
+    return this.configService.get('SEOUL_SUBWAY_API_KEY', { infer: true });
+  }
+
+  get trafficApiUrl() {
+    return this.configService.get('TRAFFIC_API_URL', { infer: true });
+  }
+
+  get weatherApiUrl() {
+    return this.configService.get('WEATHER_API_URL', { infer: true });
+  }
+
+  get seoulBusApiUrl() {
+    return this.configService.get('SEOUL_BUS_API_URL', { infer: true });
+  }
+
+  get seoulSubwayApiUrl() {
+    return this.configService.get('SEOUL_SUBWAY_API_URL', { infer: true });
+  }
+
   get fcmServerKey() {
     return this.configService.get('FCM_SERVER_KEY', { infer: true });
+  }
+
+  get expoPushApiUrl() {
+    return this.configService.get('EXPO_PUSH_API_URL', { infer: true });
   }
 
   get corsOrigins() {
