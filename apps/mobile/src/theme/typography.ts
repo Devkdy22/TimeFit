@@ -7,6 +7,7 @@ export interface TypographyPreset {
   fontSize: number;
   lineHeight: number;
   letterSpacing?: number;
+  includeFontPadding?: boolean;
 }
 
 export const typographyPresets = {
@@ -17,6 +18,7 @@ export const typographyPresets = {
       fontSize: font.size.title,
       lineHeight: font.lineHeight.title,
       letterSpacing: 0.2,
+      includeFontPadding: false,
     } satisfies TypographyPreset,
     xl: {
       fontFamily: font.family.bold,
@@ -24,6 +26,7 @@ export const typographyPresets = {
       fontSize: font.size.display,
       lineHeight: font.lineHeight.display,
       letterSpacing: 0.4,
+      includeFontPadding: false,
     } satisfies TypographyPreset,
   },
   body: {
@@ -32,18 +35,21 @@ export const typographyPresets = {
       fontWeight: font.weight.regular,
       fontSize: font.size.body,
       lineHeight: font.lineHeight.body,
+      includeFontPadding: false,
     } satisfies TypographyPreset,
     lg: {
       fontFamily: font.family.regular,
       fontWeight: font.weight.regular,
       fontSize: font.size.bodyLg,
       lineHeight: font.lineHeight.bodyLg,
+      includeFontPadding: false,
     } satisfies TypographyPreset,
     strong: {
       fontFamily: font.family.semibold,
       fontWeight: font.weight.semibold,
       fontSize: font.size.body,
       lineHeight: font.lineHeight.body,
+      includeFontPadding: false,
     } satisfies TypographyPreset,
   },
   caption: {
@@ -53,6 +59,7 @@ export const typographyPresets = {
       fontSize: font.size.caption,
       lineHeight: font.lineHeight.caption,
       letterSpacing: 0.1,
+      includeFontPadding: false,
     } satisfies TypographyPreset,
   },
 } as const;

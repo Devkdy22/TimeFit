@@ -13,6 +13,12 @@ export interface TimiProps {
   bodyTranslateY?: number;
   leftArmRotateDeg?: number;
   rightArmRotateDeg?: number;
+  facePullX?: number;
+  facePullY?: number;
+  faceDepth?: number;
+  faceFocusX?: number;
+  faceFocusY?: number;
+  showShadow?: boolean;
 }
 
 export function Timi({
@@ -25,6 +31,12 @@ export function Timi({
   bodyTranslateY = 0,
   leftArmRotateDeg = -8,
   rightArmRotateDeg = 8,
+  facePullX = 0,
+  facePullY = 0,
+  faceDepth = 0,
+  faceFocusX = 0,
+  faceFocusY = 0,
+  showShadow = true,
 }: TimiProps) {
   const transforms: Partial<TimiPartTransforms> = {
     eyesScaleY: blink,
@@ -35,5 +47,18 @@ export function Timi({
     rightArmRotateDeg,
   };
 
-  return <TimiBase tone={tone} size={size} expression={expression} transforms={transforms} />;
+  return (
+    <TimiBase
+      tone={tone}
+      size={size}
+      expression={expression}
+      transforms={transforms}
+      facePullX={facePullX}
+      facePullY={facePullY}
+      faceDepth={faceDepth}
+      faceFocusX={faceFocusX}
+      faceFocusY={faceFocusY}
+      showShadow={showShadow}
+    />
+  );
 }

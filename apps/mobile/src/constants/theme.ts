@@ -1,4 +1,5 @@
 export const uiTheme = {
+  fontFamily: 'Pretendard',
   colors: {
     primaryMint: '#58C7C2',
     primaryBlue: '#6AB8FF',
@@ -10,8 +11,8 @@ export const uiTheme = {
   },
   status: {
     safe: '#58C7C2',
-    warning: '#FF9F43',
-    danger: '#FF5D73',
+    warning: '#F59E0B',
+    danger: '#EF4444',
   },
   spacing: {
     s4: 4,
@@ -29,31 +30,31 @@ export const uiTheme = {
   },
   typography: {
     title: {
-      fontFamily: 'System',
+      fontFamily: 'Pretendard',
       fontWeight: '700',
       fontSize: 24,
       lineHeight: 32,
     },
     body: {
-      fontFamily: 'System',
+      fontFamily: 'Pretendard',
       fontWeight: '400',
       fontSize: 16,
       lineHeight: 22,
     },
     caption: {
-      fontFamily: 'System',
+      fontFamily: 'Pretendard',
       fontWeight: '500',
       fontSize: 12,
       lineHeight: 16,
     },
     button: {
-      fontFamily: 'System',
+      fontFamily: 'Pretendard',
       fontWeight: '600',
       fontSize: 16,
       lineHeight: 22,
     },
     time: {
-      fontFamily: 'System',
+      fontFamily: 'Pretendard',
       fontWeight: '700',
       fontSize: 20,
       lineHeight: 26,

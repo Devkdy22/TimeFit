@@ -1,4 +1,4 @@
-import type { ViewStyle } from 'react-native';
+import { Platform, type ViewStyle } from 'react-native';
 
 export type CubicBezier = readonly [number, number, number, number];
 
@@ -108,10 +108,26 @@ export const motion = {
 
 export const font = {
   family: {
-    regular: 'System',
-    medium: 'System',
-    semibold: 'System',
-    bold: 'System',
+    regular: Platform.select({
+      web: 'Pretendard-Medium, sans-serif',
+      android: 'Pretendard-Medium',
+      default: 'Pretendard-Medium',
+    }) as string,
+    medium: Platform.select({
+      web: 'Pretendard-Medium, sans-serif',
+      android: 'Pretendard-Medium',
+      default: 'Pretendard-Medium',
+    }) as string,
+    semibold: Platform.select({
+      web: 'Pretendard-SemiBold, sans-serif',
+      android: 'Pretendard-SemiBold',
+      default: 'Pretendard-SemiBold',
+    }) as string,
+    bold: Platform.select({
+      web: 'Pretendard-SemiBold, sans-serif',
+      android: 'Pretendard-SemiBold',
+      default: 'Pretendard-SemiBold',
+    }) as string,
   },
   weight: {
     regular: '400',
