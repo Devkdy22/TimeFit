@@ -9,6 +9,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { RecommendationModule } from './modules/recommendation/recommendation.module';
 import { RoutinesModule } from './modules/routines/routines.module';
 import { TripsModule } from './modules/trips/trips.module';
+import { KakaoLocalModule } from './modules/kakao-local/kakao-local.module';
 import { OptionalRedisProvider } from './common/cache/redis.provider';
 import { SafeLogger } from './common/logger/safe-logger.service';
 import { AppConfigService } from './common/config/app-config.service';
@@ -26,6 +27,7 @@ import type { AppEnv } from './common/config/env.schema';
     }),
     NotificationsModule,
     RecommendationModule,
+    KakaoLocalModule,
     TripsModule,
     RoutinesModule,
   ],

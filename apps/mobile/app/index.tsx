@@ -10,11 +10,18 @@ export default function IndexPage() {
     let alive = true;
 
     async function decideInitialRoute() {
-      const completed = await getIsOnboardingCompleted();
-      if (!alive) {
-        return;
+      try {
+        const completed = await getIsOnboardingCompleted();
+        if (!alive) {
+          return;
+        }
+        setInitialRoute(completed ? APP_ROUTES.beforeStartHome : APP_ROUTES.beforeStartOnboarding);
+      } catch {
+        if (!alive) {
+          return;
+        }
+        setInitialRoute(APP_ROUTES.beforeStartOnboarding);
       }
-      setInitialRoute(completed ? APP_ROUTES.beforeStartHome : APP_ROUTES.beforeStartOnboarding);
     }
 
     void decideInitialRoute();

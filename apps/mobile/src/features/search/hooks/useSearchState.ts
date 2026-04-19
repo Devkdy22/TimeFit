@@ -1,83 +1,114 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { inferPlaceIconType, useCommutePlan, type LocationField, type SavedPlace } from '../../commute-state/context';
+import { searchKakaoKeywordViaProxy } from '../../../services/api/client';
+import type { MapCenterSource } from '../../map/webview/types';
+import { setLatestGeocodeInfo } from '../../home/location/cache.util';
 
-const baseTravelMinutesByOption = {
-  fastest: 37,
-  lowTransfer: 42,
-  lowWalk: 45,
-} as const;
+type MapCenterState = {
+  lat: number;
+  lng: number;
+  address: string;
+  source: MapCenterSource;
+};
 
-type TravelOption = keyof typeof baseTravelMinutesByOption;
+const DEFAULT_MAP_CENTER: MapCenterState = {
+  lat: 37.5665,
+  lng: 126.978,
+  address: '서울 시청',
+  source: 'init',
+};
 
-const searchableLocations: SavedPlace[] = [
+const fallbackSearchPlaces: SavedPlace[] = [
   {
-    id: 'loc-gangnam-exit2',
+    id: 'fallback-gangnam',
     name: '강남역 2번 출구',
-    address: '서울 강남구 강남대로 390',
-    latitude: 37.4972,
+    address: '서울 강남구 강남대로 396',
+    latitude: 37.4979,
     longitude: 127.0276,
     iconType: 'location',
   },
   {
-    id: 'loc-seoul-station',
-    name: '서울역',
-    address: '서울 용산구 한강대로 405',
-    latitude: 37.5547,
-    longitude: 126.9706,
+    id: 'fallback-jamsil',
+    name: '잠실역',
+    address: '서울 송파구 올림픽로 265',
+    latitude: 37.5133,
+    longitude: 127.1002,
     iconType: 'location',
   },
   {
-    id: 'loc-cityhall',
-    name: '시청역',
-    address: '서울 중구 세종대로 110',
-    latitude: 37.5657,
-    longitude: 126.9769,
+    id: 'fallback-anguk',
+    name: '안국역 2번 출구',
+    address: '서울 종로구 율곡로 62',
+    latitude: 37.5766,
+    longitude: 126.9855,
     iconType: 'location',
   },
   {
-    id: 'loc-jamsil-gym',
-    name: '잠실 헬스장',
-    address: '서울 송파구 올림픽로 240',
-    latitude: 37.5122,
-    longitude: 127.1,
-    iconType: 'gym',
-  },
-  {
-    id: 'loc-office-main',
-    name: '회사',
-    address: '서울 강남구 테헤란로 212',
-    latitude: 37.5013,
-    longitude: 127.0396,
-    iconType: 'office',
+    id: 'fallback-jongno',
+    name: '종로3가역 5번 출구',
+    address: '서울 종로구 종로 130',
+    latitude: 37.5702,
+    longitude: 126.9911,
+    iconType: 'location',
   },
 ];
-
-function parseArrivalMinutes(value: string) {
-  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) {
-    return null;
-  }
-
-  const hour = Number(match[1]);
-  const minute = Number(match[2]);
-  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-    return null;
-  }
-  return hour * 60 + minute;
-}
-
-function toClockText(totalMinutes: number) {
-  const normalized = ((totalMinutes % (24 * 60)) + 24 * 60) % (24 * 60);
-  const hour = Math.floor(normalized / 60);
-  const minute = normalized % 60;
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
-}
 
 function withNamedId(place: SavedPlace) {
   return {
     ...place,
-    id: `${place.id}-${Date.now()}`,
+    id: `${place.id}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     iconType: place.iconType ?? inferPlaceIconType(place.name),
+  };
+}
+
+function toManualPlace(text: string, center: MapCenterState): SavedPlace {
+  const trimmed = text.trim();
+  return {
+    id: `manual-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: trimmed,
+    address: center.address,
+    latitude: center.lat,
+    longitude: center.lng,
+    iconType: inferPlaceIconType(trimmed),
+  };
+}
+
+function inferCenterSourceFromPlace(place: SavedPlace): MapCenterSource {
+  if (place.name.includes('내 위치') || place.id.includes('current-location')) {
+    return 'gps';
+  }
+  return 'search';
+}
+
+function mapKakaoDocumentToPlace(
+  doc: {
+    x?: string;
+    y?: string;
+    place_name?: string;
+    road_address_name?: string;
+    address_name?: string;
+  },
+  index: number,
+): SavedPlace | null {
+  const lng = Number(doc.x);
+  const lat = Number(doc.y);
+
+  if (Number.isNaN(lat) || Number.isNaN(lng)) {
+    return null;
+  }
+
+  const name = doc.place_name?.trim() || doc.road_address_name?.trim() || doc.address_name?.trim();
+  if (!name) {
+    return null;
+  }
+
+  return {
+    id: `kakao-${index}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name,
+    address: doc.road_address_name?.trim() || doc.address_name?.trim() || name,
+    latitude: lat,
+    longitude: lng,
+    iconType: inferPlaceIconType(name),
   };
 }
 
@@ -86,113 +117,347 @@ export function useSearchState() {
     origin,
     destination,
     arrivalAt,
-    savedPlaces,
     recentPlaces,
-    latestSelectedPlace,
+    savedPlaces,
     setArrivalAt,
     applyPlaceToField,
-    saveLatestPlace,
+    clearPlaceField,
   } = useCommutePlan();
 
-  const [selectedOption, setSelectedOption] = useState<TravelOption>('fastest');
+  const kakaoJsKey = process.env.EXPO_PUBLIC_KAKAO_JS_KEY ?? '';
+
   const [activeField, setActiveField] = useState<LocationField>('destination');
-  const [query, setQuery] = useState('');
-  const [isSaveNameOpen, setIsSaveNameOpen] = useState(false);
-  const [saveName, setSaveName] = useState('');
+  const [originInput, setOriginInput] = useState(origin?.name ?? '');
+  const [destinationInput, setDestinationInput] = useState(destination?.name ?? '');
+  const [mapQuery, setMapQuery] = useState('');
 
-  const options = useMemo(
-    () => [
-      { key: 'fastest' as const, label: '최소 시간' },
-      { key: 'lowTransfer' as const, label: '환승 최소' },
-      { key: 'lowWalk' as const, label: '도보 최소' },
-    ],
-    [],
-  );
+  const [mapSearchResults, setMapSearchResults] = useState<SavedPlace[]>(fallbackSearchPlaces.slice(0, 4));
+  const [fieldSuggestions, setFieldSuggestions] = useState<SavedPlace[]>([]);
+  const [isSearchingMap, setIsSearchingMap] = useState(false);
+  const [isSearchingFieldSuggestions, setIsSearchingFieldSuggestions] = useState(false);
 
-  const filteredSearchResults = useMemo(() => {
-    const keyword = query.trim().toLowerCase();
-    if (keyword.length === 0) {
-      return searchableLocations.slice(0, 4);
+  const [mapCenter, setMapCenter] = useState<MapCenterState>(() => {
+    if (origin) {
+      return {
+        lat: origin.latitude,
+        lng: origin.longitude,
+        address: origin.address,
+        source: inferCenterSourceFromPlace(origin),
+      };
     }
 
-    return searchableLocations.filter((location) => {
-      const nameMatch = location.name.toLowerCase().includes(keyword);
-      const addressMatch = location.address.toLowerCase().includes(keyword);
-      return nameMatch || addressMatch;
+    if (destination) {
+      return {
+        lat: destination.latitude,
+        lng: destination.longitude,
+        address: destination.address,
+        source: inferCenterSourceFromPlace(destination),
+      };
+    }
+
+    return DEFAULT_MAP_CENTER;
+  });
+  const [geocodeInfo, setGeocodeInfo] = useState<{
+    roadAddress: string | null;
+    jibunAddress: string | null;
+    representativeJibun: string | null;
+    lat: number;
+    lng: number;
+  } | null>(null);
+
+  const localSearchBase = useMemo(() => {
+    const merged = [
+      ...recentPlaces,
+      ...savedPlaces,
+      ...fallbackSearchPlaces,
+      ...(origin ? [origin] : []),
+      ...(destination ? [destination] : []),
+    ];
+
+    const seenId = new Set<string>();
+    const seenAddress = new Set<string>();
+    const deduped: SavedPlace[] = [];
+
+    for (const place of merged) {
+      const normalizedAddress = place.address.trim().toLowerCase();
+      if (seenId.has(place.id)) {
+        continue;
+      }
+      if (seenAddress.has(normalizedAddress)) {
+        continue;
+      }
+
+      seenId.add(place.id);
+      seenAddress.add(normalizedAddress);
+      deduped.push(place);
+    }
+
+    return deduped;
+  }, [destination, origin, recentPlaces, savedPlaces]);
+
+  useEffect(() => {
+    setOriginInput(origin?.name ?? '');
+  }, [origin?.name]);
+
+  useEffect(() => {
+    setDestinationInput(destination?.name ?? '');
+  }, [destination?.name]);
+
+  useEffect(() => {
+    const target = activeField === 'origin' ? origin : destination;
+    if (!target) {
+      return;
+    }
+
+    setMapCenter((prev) => {
+      const sameLat = Math.abs(prev.lat - target.latitude) <= 0.000002;
+      const sameLng = Math.abs(prev.lng - target.longitude) <= 0.000002;
+      const sameAddress = prev.address === target.address;
+      if (sameLat && sameLng && sameAddress) {
+        return prev;
+      }
+
+      return {
+        lat: target.latitude,
+        lng: target.longitude,
+        address: target.address,
+        source: inferCenterSourceFromPlace(target),
+      };
     });
-  }, [query]);
+  }, [activeField, origin, destination]);
 
-  const preview = useMemo(() => {
-    const totalMinutes = baseTravelMinutesByOption[selectedOption];
-    const bufferMinutes = selectedOption === 'fastest' ? 4 : selectedOption === 'lowTransfer' ? 6 : 8;
-    const arrivalMinutes = parseArrivalMinutes(arrivalAt ?? '');
+  const searchPlaces = async (keyword: string) => {
+    const normalized = keyword.trim().toLowerCase();
 
-    const recommendedDeparture =
-      arrivalMinutes == null
-        ? `도착 시간 형식을 확인하세요`
-        : `${toClockText(arrivalMinutes - totalMinutes - bufferMinutes)} 출발`;
+    if (normalized.length === 0) {
+      return localSearchBase.slice(0, 6);
+    }
 
-    return {
-      recommendedDeparture,
-      estimatedTravel: `${totalMinutes}분`,
-      buffer: `${bufferMinutes}분`,
+    try {
+      const documents = await searchKakaoKeywordViaProxy(keyword, 8);
+      const mapped = documents
+        .map((doc, index) => mapKakaoDocumentToPlace(doc, index))
+        .filter((item): item is SavedPlace => item != null);
+
+      if (mapped.length > 0) {
+        return mapped.slice(0, 8);
+      }
+    } catch {
+      // proxy unavailable -> fallback to local search results
+    }
+
+    return localSearchBase
+      .filter((place) => {
+        return (
+          place.name.toLowerCase().includes(normalized) ||
+          place.address.toLowerCase().includes(normalized)
+        );
+      })
+      .slice(0, 6);
+  };
+
+  useEffect(() => {
+    let cancelled = false;
+    const keyword = mapQuery.trim();
+
+    const timer = setTimeout(async () => {
+      try {
+        setIsSearchingMap(true);
+        const result = await searchPlaces(keyword);
+        if (!cancelled) {
+          setMapSearchResults(result);
+        }
+      } catch {
+        if (!cancelled) {
+          setMapSearchResults([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSearchingMap(false);
+        }
+      }
+    }, 240);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
     };
-  }, [arrivalAt, selectedOption]);
+  }, [mapQuery, localSearchBase]);
+
+  const activeFieldInput = activeField === 'origin' ? originInput : destinationInput;
+
+  useEffect(() => {
+    const keyword = activeFieldInput.trim();
+
+    if (keyword.length === 0) {
+      setFieldSuggestions([]);
+      return;
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        setIsSearchingFieldSuggestions(true);
+        const result = await searchPlaces(keyword);
+        if (!cancelled) {
+          setFieldSuggestions(result);
+        }
+      } catch {
+        if (!cancelled) {
+          setFieldSuggestions([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSearchingFieldSuggestions(false);
+        }
+      }
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [activeFieldInput, activeField, localSearchBase]);
+
+  const recentDestinationCards = useMemo(() => {
+    const previewTimes = ['18:45', '13:00', '19:00'];
+    return recentPlaces.slice(0, 3).map((place, index) => ({
+      ...place,
+      previewTime: previewTimes[index] ?? '18:00',
+    }));
+  }, [recentPlaces]);
+
+  const applyTypedField = (field: LocationField) => {
+    const typedValue = field === 'origin' ? originInput.trim() : destinationInput.trim();
+
+    if (typedValue.length === 0) {
+      clearPlaceField(field);
+      return;
+    }
+
+    applyPlaceToField(field, toManualPlace(typedValue, mapCenter));
+  };
+
+  const selectPlaceToField = (field: LocationField, place: SavedPlace) => {
+    applyPlaceToField(field, withNamedId(place));
+
+    if (field === 'origin') {
+      setOriginInput(place.name);
+    } else {
+      setDestinationInput(place.name);
+    }
+
+    setMapCenter({
+      lat: place.latitude,
+      lng: place.longitude,
+      address: place.address,
+      source: 'search',
+    });
+  };
+
+  const selectPlaceForActiveField = (place: SavedPlace) => {
+    selectPlaceToField(activeField, place);
+    setFieldSuggestions([]);
+  };
+
+  const selectRecentDestination = (place: SavedPlace) => {
+    selectPlaceToField('destination', place);
+  };
+
+  const applyMapCenterToActiveField = () => {
+    const currentText = activeField === 'origin' ? originInput.trim() : destinationInput.trim();
+
+    const name = currentText.length > 0 ? currentText : mapCenter.address;
+    const nextPlace: SavedPlace = {
+      id: `map-center-${Date.now()}`,
+      name,
+      address: mapCenter.address,
+      latitude: mapCenter.lat,
+      longitude: mapCenter.lng,
+      iconType: inferPlaceIconType(name),
+    };
+
+    selectPlaceToField(activeField, nextPlace);
+    setFieldSuggestions([]);
+  };
+
+  const handleGeocodeResult = (info: {
+    lat: number;
+    lng: number;
+    roadAddress: string | null;
+    jibunAddress: string | null;
+    representativeJibun: string | null;
+  }) => {
+    const refinedName = info.representativeJibun || info.jibunAddress || info.roadAddress || null;
+    const refinedAddress = info.jibunAddress || info.roadAddress || refinedName;
+
+    setGeocodeInfo({
+      roadAddress: info.roadAddress,
+      jibunAddress: info.jibunAddress,
+      representativeJibun: info.representativeJibun,
+      lat: info.lat,
+      lng: info.lng,
+    });
+    setLatestGeocodeInfo({
+      lat: info.lat,
+      lng: info.lng,
+      roadAddress: info.roadAddress,
+      jibunAddress: info.jibunAddress,
+      representativeJibun: info.representativeJibun,
+      updatedAt: Date.now(),
+    });
+
+    if (
+      origin &&
+      refinedName &&
+      (origin.id.includes('current-location-resolved') || origin.name.trim() === '내 위치')
+    ) {
+      applyPlaceToField('origin', {
+        ...origin,
+        id: origin.id,
+        name: refinedName,
+        address: refinedAddress || origin.address,
+        latitude: info.lat,
+        longitude: info.lng,
+      });
+    }
+
+    setMapCenter((prev) => {
+      const nextAddress = refinedName || prev.address;
+      if (nextAddress === prev.address) {
+        return prev;
+      }
+      return {
+        ...prev,
+        address: nextAddress,
+      };
+    });
+  };
 
   return {
     activeField,
-    originLabel: origin?.name ?? '출발지를 선택하세요',
-    destinationLabel: destination?.name ?? '어디로 가시나요?',
-    arrivalAt: arrivalAt ?? '09:00',
-    selectedOption,
-    options,
-    query,
-    preview,
-    savedPlaces,
-    recentPlaces,
-    filteredSearchResults,
-    latestSelectedPlace,
-    isSaveNameOpen,
-    saveName,
-    setQuery,
-    setSaveName,
+    arrivalAt: arrivalAt ?? '19:00',
+    recentDestinationCards,
+    originInput,
+    destinationInput,
+    fieldSuggestions,
+    isSearchingFieldSuggestions,
+    mapQuery,
+    mapSearchResults,
+    isSearchingMap,
+    mapCenter,
+    geocodeInfo,
+    kakaoJsKey,
     setArrivalAt,
-    setSelectedOption,
     setActiveField,
-    selectPlace: (place: SavedPlace) => {
-      applyPlaceToField(activeField, withNamedId(place));
-      setIsSaveNameOpen(false);
-      setSaveName('');
-    },
-    selectMapSample: () => {
-      applyPlaceToField(activeField, {
-        id: `map-picked-${Date.now()}`,
-        name: '지도에서 선택한 위치',
-        address: '서울 중구 을지로 66',
-        latitude: 37.5662,
-        longitude: 126.9913,
-        iconType: 'location',
-      });
-      setIsSaveNameOpen(false);
-      setSaveName('');
-    },
-    openSaveName: () => {
-      if (!latestSelectedPlace) {
-        return;
-      }
-      setSaveName(latestSelectedPlace.name);
-      setIsSaveNameOpen(true);
-    },
-    savePlace: () => {
-      const saved = saveLatestPlace(saveName);
-      if (saved) {
-        setIsSaveNameOpen(false);
-        setSaveName('');
-      }
-    },
-    cancelSavePlace: () => {
-      setIsSaveNameOpen(false);
-      setSaveName('');
-    },
+    setOriginInput,
+    setDestinationInput,
+    setMapQuery,
+    setMapCenter,
+    handleGeocodeResult,
+    applyTypedField,
+    selectPlaceForActiveField,
+    selectRecentDestination,
+    applyMapCenterToActiveField,
   };
 }

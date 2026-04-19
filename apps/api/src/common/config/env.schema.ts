@@ -8,6 +8,7 @@ const envSchema = z
     JWT_ACCESS_SECRET: z.string().min(32, 'JWT_ACCESS_SECRET must be at least 32 chars'),
     JWT_REFRESH_SECRET: z.string().min(32, 'JWT_REFRESH_SECRET must be at least 32 chars'),
     KAKAO_API_KEY: z.string().min(1),
+    KAKAO_REST_API_KEY: z.string().optional().default(''),
     WEATHER_API_KEY: z.string().min(1),
     SEOUL_API_KEY: z.string().min(1),
     SEOUL_SUBWAY_API_KEY: z.string().min(1),

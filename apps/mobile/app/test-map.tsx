@@ -1,6 +1,5 @@
-import { TestMapScreen } from '../src/features/map/screen/TestMapScreen';
+import { MapScreen } from '../src/components/MapScreen';
 
 export default function TestMapPage() {
-  return <TestMapScreen />;
+  return <MapScreen />;
 }
-

@@ -58,7 +58,7 @@ export function TestMapScreen() {
         {KAKAO_JAVASCRIPT_KEY ? (
           <KakaoMapWebView
             ref={mapRef}
-            apiKey={KAKAO_JAVASCRIPT_KEY}
+            jsApiKey={KAKAO_JAVASCRIPT_KEY}
             initialCenter={INITIAL_COORDINATE}
             initialMarker={INITIAL_COORDINATE}
             onEvent={handleMapEvent}

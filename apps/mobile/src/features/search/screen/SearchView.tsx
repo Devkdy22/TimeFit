@@ -1,487 +1,590 @@
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { BottomCTA, ListItemCard, ScreenContainer, SectionHeader } from '../../../components/ui';
-import { uiTheme } from '../../../constants/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { useState } from 'react';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import { HomeTabBar, TimeWheelPicker } from '../../../components/home';
+import { KakaoMapCrossPlatform } from '../../map/components/KakaoMapCrossPlatform';
 import type { LocationField, SavedPlace } from '../../commute-state/context';
+import type { MapCenterSource } from '../../map/webview/types';
+
+type SearchDestinationCard = SavedPlace & {
+  previewTime: string;
+};
+
+type MapCenterState = {
+  lat: number;
+  lng: number;
+  address: string;
+  source: MapCenterSource;
+};
 
 export interface SearchViewProps {
   activeField: LocationField;
-  origin: string;
-  destination: string;
   arrivalAt: string;
-  selectedOption: 'fastest' | 'lowTransfer' | 'lowWalk';
-  options: ReadonlyArray<{ key: 'fastest' | 'lowTransfer' | 'lowWalk'; label: string }>;
-  query: string;
-  preview: {
-    recommendedDeparture: string;
-    estimatedTravel: string;
-    buffer: string;
-  };
-  recentPlaces: SavedPlace[];
-  savedPlaces: SavedPlace[];
-  filteredSearchResults: SavedPlace[];
-  latestSelectedPlace: SavedPlace | null;
-  isSaveNameOpen: boolean;
-  saveName: string;
-  onChangeQuery: (next: string) => void;
-  onChangeSaveName: (next: string) => void;
+  recentDestinations: SearchDestinationCard[];
+  originInput: string;
+  destinationInput: string;
+  fieldSuggestions: SavedPlace[];
+  isSearchingFieldSuggestions: boolean;
+  mapQuery: string;
+  mapSearchResults: SavedPlace[];
+  isSearchingMap: boolean;
+  mapCenter: MapCenterState;
+  kakaoJsKey: string;
   onSelectField: (field: LocationField) => void;
-  onSelectPlace: (place: SavedPlace) => void;
-  onSelectMapSample: () => void;
-  onOpenSaveName: () => void;
-  onSavePlace: () => void;
-  onCancelSavePlace: () => void;
   onChangeArrivalAt: (next: string) => void;
-  onSelectOption: (key: 'fastest' | 'lowTransfer' | 'lowWalk') => void;
+  onChangeOriginInput: (text: string) => void;
+  onChangeDestinationInput: (text: string) => void;
+  onBlurField: (field: LocationField) => void;
+  onChangeMapQuery: (text: string) => void;
+  onSelectMapResult: (place: SavedPlace) => void;
+  onSelectRecentDestination: (place: SavedPlace) => void;
+  onMapCenterChange: (next: MapCenterState) => void;
+  onGeocodeResult: (info: {
+    lat: number;
+    lng: number;
+    roadAddress: string | null;
+    jibunAddress: string | null;
+    representativeJibun: string | null;
+  }) => void;
+  onApplyMapCenter: () => void;
   onPressRecommendation: () => void;
   onClose: () => void;
 }
 
-function parseClock(value: string) {
-  const match = value.match(/^(\d{1,2}):(\d{2})$/);
-  if (!match) {
-    return null;
-  }
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
-    return null;
-  }
-  return hours * 60 + minutes;
-}
+function toMeridiemClock(value: string) {
+  const [hourText, minuteText] = value.split(':');
+  const hour = Number(hourText);
+  const minute = Number(minuteText);
 
-function shiftClock(value: string, deltaMinutes: number) {
-  const minutes = parseClock(value);
-  if (minutes == null) {
-    return value;
+  if (Number.isNaN(hour) || Number.isNaN(minute)) {
+    return 'PM 07:00';
   }
-  const next = ((minutes + deltaMinutes) % (24 * 60) + 24 * 60) % (24 * 60);
-  const hour = Math.floor(next / 60);
-  const minute = next % 60;
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+
+  const period = hour >= 12 ? 'PM' : 'AM';
+  const clockHour = hour % 12 === 0 ? 12 : hour % 12;
+  return `${period} ${String(clockHour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
 export function SearchView({
   activeField,
-  origin,
-  destination,
   arrivalAt,
-  selectedOption,
-  options,
-  query,
-  preview,
-  recentPlaces,
-  savedPlaces,
-  filteredSearchResults,
-  latestSelectedPlace,
-  isSaveNameOpen,
-  saveName,
-  onChangeQuery,
-  onChangeSaveName,
+  recentDestinations,
+  originInput,
+  destinationInput,
+  fieldSuggestions,
+  isSearchingFieldSuggestions,
+  mapQuery,
+  mapSearchResults,
+  isSearchingMap,
+  mapCenter,
+  kakaoJsKey,
   onSelectField,
-  onSelectPlace,
-  onSelectMapSample,
-  onOpenSaveName,
-  onSavePlace,
-  onCancelSavePlace,
   onChangeArrivalAt,
-  onSelectOption,
+  onChangeOriginInput,
+  onChangeDestinationInput,
+  onBlurField,
+  onChangeMapQuery,
+  onSelectMapResult,
+  onSelectRecentDestination,
+  onMapCenterChange,
+  onGeocodeResult,
+  onApplyMapCenter,
   onPressRecommendation,
   onClose,
 }: SearchViewProps) {
+  const [timePickerVisible, setTimePickerVisible] = useState(false);
+
   return (
-    <ScreenContainer contentContainerStyle={styles.container}>
-      <SectionHeader title="조건 확정" subtitle="입력과 동시에 결과를 미리 확인하세요" status="warning" actionLabel="닫기" onPressAction={onClose} />
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.screen}>
+        <Svg pointerEvents="none" width="100%" height="100%" style={StyleSheet.absoluteFillObject}>
+          <Defs>
+            <LinearGradient id="searchBgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+              <Stop offset="0%" stopColor="#DEFFFE" stopOpacity="0.95" />
+              <Stop offset="100%" stopColor="#F8F8FF" stopOpacity="0.92" />
+            </LinearGradient>
+          </Defs>
+          <Rect x="0" y="0" width="100%" height="100%" fill="url(#searchBgGradient)" />
+        </Svg>
 
-      <ScrollView style={styles.contentArea} contentContainerStyle={styles.contentScroll} showsVerticalScrollIndicator={false}>
-        <View style={styles.conditionPanel}>
-          <Text style={styles.sectionTitle}>어디서 어디로 이동하나요?</Text>
-          <View style={styles.fieldRow}>
+        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.headerRow}>
             <Pressable
-              onPress={() => onSelectField('origin')}
-              style={({ pressed }) => [styles.fieldButton, activeField === 'origin' ? styles.fieldButtonActive : null, { opacity: pressed ? 0.9 : 1 }]}
+              onPress={onClose}
+              style={({ pressed }) => [styles.backButton, { opacity: pressed ? 0.9 : 1 }]}
             >
-              <Text style={styles.fieldLabel}>출발지</Text>
-              <Text style={styles.fieldValue}>{origin}</Text>
+              <Ionicons name="arrow-back-outline" size={26} color="#FFFFFF" />
             </Pressable>
-            <Pressable
-              onPress={() => onSelectField('destination')}
-              style={({ pressed }) => [styles.fieldButton, activeField === 'destination' ? styles.fieldButtonActive : null, { opacity: pressed ? 0.9 : 1 }]}
-            >
-              <Text style={styles.fieldLabel}>도착지</Text>
-              <Text style={styles.fieldValue}>{destination}</Text>
-            </Pressable>
+            <Text style={styles.headerTitle}>경로 검색</Text>
           </View>
 
-          <Text style={styles.sectionTitle}>도착 시간</Text>
-          <View style={styles.arrivalRow}>
-            <Pressable onPress={() => onChangeArrivalAt(shiftClock(arrivalAt, -10))} style={({ pressed }) => [styles.arrivalControl, { opacity: pressed ? 0.88 : 1 }]}>
-              <Text style={styles.arrivalControlText}>-10분</Text>
-            </Pressable>
-            <View style={styles.arrivalBadge}>
-              <Text style={styles.arrivalText}>{arrivalAt}</Text>
+          <View style={styles.fieldCard}>
+            <TextInput
+              value={originInput}
+              onFocus={() => onSelectField('origin')}
+              onBlur={() => onBlurField('origin')}
+              onChangeText={onChangeOriginInput}
+              placeholder="출발지 입력"
+              placeholderTextColor="#6F8F90"
+              style={[styles.fieldInput, activeField === 'origin' ? styles.fieldInputActive : null]}
+            />
+            <View style={styles.divider} />
+            <TextInput
+              value={destinationInput}
+              onFocus={() => onSelectField('destination')}
+              onBlur={() => onBlurField('destination')}
+              onChangeText={onChangeDestinationInput}
+              placeholder="도착지 입력"
+              placeholderTextColor="#6F8F90"
+              style={[
+                styles.fieldInput,
+                styles.fieldInputBottom,
+                activeField === 'destination' ? styles.fieldInputActive : null,
+              ]}
+            />
+          </View>
+
+          {isSearchingFieldSuggestions ? (
+            <View style={styles.fieldSuggestionPanel}>
+              <Text style={styles.fieldSuggestionHint}>추천 장소를 불러오는 중...</Text>
             </View>
-            <Pressable onPress={() => onChangeArrivalAt(shiftClock(arrivalAt, 10))} style={({ pressed }) => [styles.arrivalControl, { opacity: pressed ? 0.88 : 1 }]}>
-              <Text style={styles.arrivalControlText}>+10분</Text>
-            </Pressable>
-          </View>
-        </View>
+          ) : null}
 
-        <View style={styles.conditionPanel}>
-          <Text style={styles.sectionTitle}>주소 검색</Text>
-          <TextInput
-            value={query}
-            onChangeText={onChangeQuery}
-            placeholder="장소명 또는 주소를 입력하세요"
-            placeholderTextColor={uiTheme.colors.textSecondary}
-            style={styles.searchInput}
-          />
-          <View style={styles.resultList}>
-            {filteredSearchResults.map((place) => (
-              <ListItemCard
-                key={place.id}
-                title={place.name}
-                subtitle={place.address}
-                dense
-                onPress={() => onSelectPlace(place)}
-              />
-            ))}
-          </View>
-        </View>
+          {!isSearchingFieldSuggestions && fieldSuggestions.length > 0 ? (
+            <View style={styles.fieldSuggestionPanel}>
+              {fieldSuggestions.slice(0, 5).map((place, index) => (
+                <Pressable
+                  key={`${place.id}-${index}`}
+                  onPress={() => onSelectMapResult(place)}
+                  style={({ pressed }) => [styles.fieldSuggestionItem, { opacity: pressed ? 0.9 : 1 }]}
+                >
+                  <Text style={styles.fieldSuggestionName}>{place.name}</Text>
+                  <Text style={styles.fieldSuggestionAddress} numberOfLines={1}>
+                    {place.address}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          ) : null}
 
-        <View style={styles.conditionPanel}>
-          <Text style={styles.sectionTitle}>지도에서 선택</Text>
-          <Pressable onPress={onSelectMapSample} style={({ pressed }) => [styles.mapSelectCard, { opacity: pressed ? 0.9 : 1 }]}> 
-            <Text style={styles.mapSelectTitle}>지도 기반 선택 (확장 준비)</Text>
-            <Text style={styles.mapSelectSubtitle}>현재는 샘플 지점을 선택하도록 연결되어 있어요.</Text>
+          <Pressable
+            onPress={() => setTimePickerVisible(true)}
+            style={({ pressed }) => [styles.arrivalCard, { opacity: pressed ? 0.94 : 1 }]}
+          >
+            <Text style={styles.arrivalLabel}>도착시간</Text>
+            <Text style={styles.arrivalValue}>{toMeridiemClock(arrivalAt)}</Text>
+            <Ionicons name="time-outline" size={24} color="#58C7C2" />
           </Pressable>
 
-          {latestSelectedPlace ? (
-            <View style={styles.saveArea}>
-              <Text style={styles.saveHint}>선택된 위치: {latestSelectedPlace.address}</Text>
-              {!isSaveNameOpen ? (
-                <Pressable onPress={onOpenSaveName} style={({ pressed }) => [styles.saveButton, { opacity: pressed ? 0.92 : 1 }]}>
-                  <Text style={styles.saveButtonText}>이 장소 저장하기</Text>
+          <View style={styles.mapSection}>
+            <Text style={styles.mapTitle}>지도에서 선택</Text>
+
+            <TextInput
+              value={mapQuery}
+              onChangeText={onChangeMapQuery}
+              placeholder="장소/도로명 검색"
+              placeholderTextColor="#6F8F90"
+              style={styles.mapQueryInput}
+            />
+
+            {isSearchingMap ? <Text style={styles.searchingText}>카카오 지도 검색 중...</Text> : null}
+
+            <View style={styles.mapResultList}>
+              {mapSearchResults.slice(0, 3).map((place, index) => (
+                <Pressable
+                  key={`${place.id}-${index}`}
+                  onPress={() => onSelectMapResult(place)}
+                  style={({ pressed }) => [styles.mapResultItem, { opacity: pressed ? 0.9 : 1 }]}
+                >
+                  <Text style={styles.mapResultName}>{place.name}</Text>
+                  <Text style={styles.mapResultAddress} numberOfLines={1}>
+                    {place.address}
+                  </Text>
                 </Pressable>
+              ))}
+            </View>
+
+            <View style={styles.mapWrap}>
+              {kakaoJsKey ? (
+                <KakaoMapCrossPlatform
+                  jsApiKey={kakaoJsKey}
+                  center={{ lat: mapCenter.lat, lng: mapCenter.lng, address: mapCenter.address, source: mapCenter.source }}
+                  onCenterChange={(next) => {
+                    onMapCenterChange({
+                      lat: next.lat,
+                      lng: next.lng,
+                      address: next.address ?? mapCenter.address,
+                      source: next.source ?? 'user',
+                    });
+                  }}
+                  onGeocodeResult={onGeocodeResult}
+                  style={styles.map}
+                />
               ) : (
-                <View style={styles.saveInputWrap}>
-                  <TextInput
-                    value={saveName}
-                    onChangeText={onChangeSaveName}
-                    placeholder="예: 집, 회사, 헬스장"
-                    placeholderTextColor={uiTheme.colors.textSecondary}
-                    style={styles.saveInput}
-                  />
-                  <View style={styles.saveActionRow}>
-                    <Pressable onPress={onCancelSavePlace} style={({ pressed }) => [styles.saveActionGhost, { opacity: pressed ? 0.9 : 1 }]}> 
-                      <Text style={styles.saveActionGhostText}>취소</Text>
-                    </Pressable>
-                    <Pressable onPress={onSavePlace} style={({ pressed }) => [styles.saveActionPrimary, { opacity: pressed ? 0.9 : 1 }]}> 
-                      <Text style={styles.saveActionPrimaryText}>저장</Text>
-                    </Pressable>
-                  </View>
+                <View style={styles.mapMissingWrap}>
+                  <Text style={styles.mapMissingText}>
+                    EXPO_PUBLIC_KAKAO_JS_KEY를 설정하면 지도를 바로 선택할 수 있어요.
+                  </Text>
                 </View>
               )}
             </View>
-          ) : null}
-        </View>
 
-        <View style={styles.conditionPanel}>
-          <Text style={styles.sectionTitle}>최근 검색</Text>
-          <View style={styles.resultList}>
-            {recentPlaces.slice(0, 3).map((place) => (
-              <ListItemCard
-                key={place.id}
-                title={place.name}
-                subtitle={place.address}
-                dense
-                onPress={() => onSelectPlace(place)}
-              />
-            ))}
+            <Text style={styles.centerAddress} numberOfLines={1}>
+              중심 위치: {mapCenter.address}
+            </Text>
+
+            <Pressable
+              onPress={onApplyMapCenter}
+              style={({ pressed }) => [styles.mapApplyButton, { opacity: pressed ? 0.9 : 1 }]}
+            >
+              <Text style={styles.mapApplyButtonText}>현재 지도 중심으로 {activeField === 'origin' ? '출발지' : '도착지'} 설정</Text>
+            </Pressable>
           </View>
-        </View>
 
-        <View style={styles.conditionPanel}>
-          <Text style={styles.sectionTitle}>저장된 장소</Text>
-          <View style={styles.resultList}>
-            {savedPlaces.map((place) => (
-              <ListItemCard
-                key={place.id}
-                title={place.name}
-                subtitle={place.address}
-                dense
-                onPress={() => onSelectPlace(place)}
-              />
-            ))}
-          </View>
-        </View>
-
-        <View style={styles.optionSection}>
-          <Text style={styles.sectionTitle}>이동 옵션</Text>
-          <View style={styles.optionRow}>
-            {options.map((option) => (
+          <View style={styles.recentWrap}>
+            <Text style={styles.recentTitle}>최근 목적지</Text>
+            {recentDestinations.map((place, index) => (
               <Pressable
-                key={option.key}
-                onPress={() => onSelectOption(option.key)}
-                style={({ pressed }) => [
-                  styles.optionButton,
-                  selectedOption === option.key ? styles.optionSelected : null,
-                  { opacity: pressed ? 0.88 : 1 },
-                ]}
+                key={`${place.id}-${index}`}
+                onPress={() => onSelectRecentDestination(place)}
+                style={({ pressed }) => [styles.recentCard, { opacity: pressed ? 0.92 : 1 }]}
               >
-                <Text style={[styles.optionText, selectedOption === option.key ? styles.optionTextSelected : null]}>
-                  {option.label}
-                </Text>
+                <View style={styles.recentIconWrap}>
+                  <Ionicons name="location-outline" size={24} color="#0E2C2C" />
+                </View>
+                <View style={styles.recentInfo}>
+                  <Text style={styles.recentName}>{place.name}</Text>
+                  <Text style={styles.recentHint}>자주가는 곳</Text>
+                </View>
+                <Text style={styles.recentTime}>{place.previewTime}</Text>
               </Pressable>
             ))}
           </View>
-        </View>
-      </ScrollView>
 
-      <View style={styles.bottomFixed}>
-        <View style={styles.previewSection}>
-          <Text style={styles.previewTitle}>결과 미리보기</Text>
-          <Text style={styles.previewItem}>추천 출발 시간: {preview.recommendedDeparture}</Text>
-          <Text style={styles.previewItem}>예상 소요 시간: {preview.estimatedTravel}</Text>
-          <Text style={styles.previewItem}>여유 시간: {preview.buffer}</Text>
-        </View>
-        <BottomCTA label="추천 결과 보기" status="warning" onPress={onPressRecommendation} />
+          <Pressable
+            onPress={onPressRecommendation}
+            style={({ pressed }) => [styles.searchButton, { opacity: pressed ? 0.9 : 1 }]}
+          >
+            <Text style={styles.searchButtonText}>경로 검색</Text>
+          </Pressable>
+        </ScrollView>
+
+        <HomeTabBar status="relaxed" />
       </View>
-    </ScreenContainer>
+
+      <TimeWheelPicker
+        visible={timePickerVisible}
+        initialTime={arrivalAt}
+        accentColor="#58C7C2"
+        onClose={() => setTimePickerVisible(false)}
+        onConfirm={(time) => {
+          onChangeArrivalAt(time);
+          setTimePickerVisible(false);
+        }}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    justifyContent: 'flex-start',
-    gap: uiTheme.spacing.s12,
-    paddingBottom: uiTheme.spacing.s24,
+  safeArea: {
+    flex: 1,
+    backgroundColor: '#F5F7F8',
   },
-  contentArea: {
+  screen: {
     flex: 1,
   },
-  contentScroll: {
-    gap: uiTheme.spacing.s16,
-    paddingBottom: uiTheme.spacing.s12,
+  scrollContent: {
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    paddingBottom: 146,
+    gap: 14,
   },
-  conditionPanel: {
-    borderRadius: uiTheme.radius.large,
-    backgroundColor: uiTheme.colors.card,
-    borderWidth: 1,
-    borderColor: uiTheme.colors.divider,
-    paddingHorizontal: uiTheme.spacing.s16,
-    paddingVertical: uiTheme.spacing.s16,
-    gap: uiTheme.spacing.s12,
-  },
-  sectionTitle: {
-    ...uiTheme.typography.body,
-    color: uiTheme.colors.textPrimary,
-    fontWeight: '600',
-  },
-  fieldRow: {
-    flexDirection: 'row',
-    gap: uiTheme.spacing.s8,
-  },
-  fieldButton: {
-    flex: 1,
-    borderRadius: uiTheme.radius.medium,
-    borderWidth: 1,
-    borderColor: uiTheme.colors.divider,
-    backgroundColor: uiTheme.colors.background,
-    paddingHorizontal: uiTheme.spacing.s12,
-    paddingVertical: uiTheme.spacing.s12,
-    gap: uiTheme.spacing.s4,
-  },
-  fieldButtonActive: {
-    borderColor: uiTheme.colors.primaryBlue,
-  },
-  fieldLabel: {
-    ...uiTheme.typography.caption,
-    color: uiTheme.colors.textSecondary,
-  },
-  fieldValue: {
-    ...uiTheme.typography.body,
-    color: uiTheme.colors.textPrimary,
-    fontWeight: '500',
-  },
-  arrivalRow: {
+  headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: uiTheme.spacing.s8,
+    gap: 14,
   },
-  arrivalControl: {
-    minHeight: 40,
-    borderRadius: uiTheme.radius.medium,
-    borderWidth: 1,
-    borderColor: uiTheme.colors.divider,
-    backgroundColor: uiTheme.colors.background,
-    paddingHorizontal: uiTheme.spacing.s12,
+  backButton: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: '#58C7C2',
+    alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#6ED6CD',
+    shadowOpacity: 0.9,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 13,
+    elevation: 8,
   },
-  arrivalControlText: {
-    ...uiTheme.typography.caption,
-    color: uiTheme.colors.textPrimary,
+  headerTitle: {
+    fontFamily: 'Pretendard-ExtraBold',
+    fontSize: 30,
+    color: '#0D2B2A',
   },
-  arrivalBadge: {
+  fieldCard: {
+    borderRadius: 20,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.6)',
+    shadowColor: '#58C7C2',
+    shadowOpacity: 0.45,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 13,
+    elevation: 5,
+  },
+  fieldInput: {
+    minHeight: 58,
+    fontFamily: 'Pretendard-Bold',
+    fontSize: 16,
+    color: '#0E2C2C',
+    paddingHorizontal: 24,
+  },
+  fieldInputBottom: {
+    borderTopWidth: 1,
+    borderTopColor: '#58C7C2',
+  },
+  fieldInputActive: {
+    backgroundColor: 'rgba(88,199,194,0.14)',
+  },
+  divider: {
+    height: 1,
+    backgroundColor: '#58C7C2',
+  },
+  fieldSuggestionPanel: {
+    marginTop: -4,
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.95)',
+    borderWidth: 1,
+    borderColor: '#CDEDEC',
+    overflow: 'hidden',
+  },
+  fieldSuggestionItem: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#E8F7F6',
+  },
+  fieldSuggestionName: {
+    fontFamily: 'Pretendard-SemiBold',
+    fontSize: 14,
+    color: '#0E2C2C',
+  },
+  fieldSuggestionAddress: {
+    marginTop: 2,
+    fontFamily: 'Pretendard-Medium',
+    fontSize: 12,
+    color: '#6F8F90',
+  },
+  fieldSuggestionHint: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontFamily: 'Pretendard-Medium',
+    fontSize: 12,
+    color: '#6F8F90',
+  },
+  arrivalCard: {
+    minHeight: 84,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.6)',
+    shadowColor: '#58C7C2',
+    shadowOpacity: 0.45,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 13,
+    elevation: 5,
+    paddingHorizontal: 22,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  arrivalLabel: {
+    fontFamily: 'Pretendard-Bold',
+    fontSize: 15,
+    color: '#6F8F90',
+    marginRight: 14,
+  },
+  arrivalValue: {
     flex: 1,
+    fontFamily: 'Pretendard-ExtraBold',
+    fontSize: 34,
+    color: '#0D2B2A',
+  },
+  mapSection: {
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.6)',
+    shadowColor: '#1B2A2A',
+    shadowOpacity: 0.12,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 18,
+    elevation: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    gap: 10,
+  },
+  mapTitle: {
+    fontFamily: 'Pretendard-Bold',
+    fontSize: 18,
+    color: '#0E2C2C',
+  },
+  mapQueryInput: {
     minHeight: 44,
-    borderRadius: uiTheme.radius.medium,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: uiTheme.colors.divider,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: uiTheme.colors.card,
+    borderColor: '#BFE8E5',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 12,
+    fontFamily: 'Pretendard-Medium',
+    fontSize: 14,
+    color: '#0E2C2C',
   },
-  arrivalText: {
-    ...uiTheme.typography.time,
-    color: uiTheme.colors.textPrimary,
+  searchingText: {
+    fontFamily: 'Pretendard-Medium',
+    fontSize: 12,
+    color: '#6F8F90',
   },
-  searchInput: {
-    minHeight: 52,
-    borderRadius: uiTheme.radius.large,
-    backgroundColor: uiTheme.colors.background,
+  mapResultList: {
+    gap: 6,
+  },
+  mapResultItem: {
+    borderRadius: 10,
+    backgroundColor: '#F4FBFB',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  mapResultName: {
+    fontFamily: 'Pretendard-Bold',
+    fontSize: 14,
+    color: '#0E2C2C',
+  },
+  mapResultAddress: {
+    marginTop: 2,
+    fontFamily: 'Pretendard-Medium',
+    fontSize: 12,
+    color: '#6F8F90',
+  },
+  mapWrap: {
+    height: 210,
+    borderRadius: 14,
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: uiTheme.colors.divider,
-    paddingHorizontal: uiTheme.spacing.s16,
-    ...uiTheme.typography.body,
-    color: uiTheme.colors.textPrimary,
+    borderColor: '#BFE8E5',
   },
-  resultList: {
-    gap: uiTheme.spacing.s8,
-  },
-  mapSelectCard: {
-    borderRadius: uiTheme.radius.medium,
-    borderWidth: 1,
-    borderColor: uiTheme.colors.divider,
-    paddingHorizontal: uiTheme.spacing.s12,
-    paddingVertical: uiTheme.spacing.s12,
-    backgroundColor: uiTheme.colors.background,
-    gap: uiTheme.spacing.s4,
-  },
-  mapSelectTitle: {
-    ...uiTheme.typography.body,
-    color: uiTheme.colors.textPrimary,
-    fontWeight: '500',
-  },
-  mapSelectSubtitle: {
-    ...uiTheme.typography.caption,
-    color: uiTheme.colors.textSecondary,
-  },
-  saveArea: {
-    borderRadius: uiTheme.radius.medium,
-    borderWidth: 1,
-    borderColor: uiTheme.colors.divider,
-    backgroundColor: uiTheme.colors.background,
-    paddingHorizontal: uiTheme.spacing.s12,
-    paddingVertical: uiTheme.spacing.s12,
-    gap: uiTheme.spacing.s8,
-  },
-  saveHint: {
-    ...uiTheme.typography.caption,
-    color: uiTheme.colors.textSecondary,
-  },
-  saveButton: {
-    minHeight: 42,
-    borderRadius: uiTheme.radius.medium,
-    backgroundColor: uiTheme.colors.primaryMint,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveButtonText: {
-    ...uiTheme.typography.button,
-    color: uiTheme.colors.textPrimary,
-  },
-  saveInputWrap: {
-    gap: uiTheme.spacing.s8,
-  },
-  saveInput: {
-    minHeight: 48,
-    borderRadius: uiTheme.radius.medium,
-    borderWidth: 1,
-    borderColor: uiTheme.colors.divider,
-    backgroundColor: uiTheme.colors.card,
-    paddingHorizontal: uiTheme.spacing.s12,
-    ...uiTheme.typography.body,
-    color: uiTheme.colors.textPrimary,
-  },
-  saveActionRow: {
-    flexDirection: 'row',
-    gap: uiTheme.spacing.s8,
-  },
-  saveActionGhost: {
+  map: {
     flex: 1,
-    minHeight: 40,
-    borderRadius: uiTheme.radius.medium,
-    borderWidth: 1,
-    borderColor: uiTheme.colors.divider,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  saveActionGhostText: {
-    ...uiTheme.typography.caption,
-    color: uiTheme.colors.textSecondary,
-  },
-  saveActionPrimary: {
+  mapMissingWrap: {
     flex: 1,
-    minHeight: 40,
-    borderRadius: uiTheme.radius.medium,
-    backgroundColor: uiTheme.colors.primaryBlue,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#E8EEF7',
+    paddingHorizontal: 16,
+  },
+  mapMissingText: {
+    textAlign: 'center',
+    fontFamily: 'Pretendard-Medium',
+    fontSize: 13,
+    color: '#48656A',
+  },
+  centerAddress: {
+    fontFamily: 'Pretendard-Medium',
+    fontSize: 12,
+    color: '#6F8F90',
+  },
+  mapApplyButton: {
+    minHeight: 44,
+    borderRadius: 12,
+    backgroundColor: '#58C7C2',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  saveActionPrimaryText: {
-    ...uiTheme.typography.caption,
-    color: uiTheme.colors.textPrimary,
-    fontWeight: '600',
+  mapApplyButtonText: {
+    fontFamily: 'Pretendard-SemiBold',
+    fontSize: 14,
+    color: '#FFFFFF',
   },
-  optionSection: {
-    gap: uiTheme.spacing.s8,
+  recentWrap: {
+    gap: 12,
   },
-  optionRow: {
+  recentTitle: {
+    fontFamily: 'Pretendard-Bold',
+    fontSize: 18,
+    color: '#0E2C2C',
+  },
+  recentCard: {
+    minHeight: 90,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.9)',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.6)',
+    shadowColor: '#000000',
+    shadowOpacity: 0.18,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 20,
+    elevation: 4,
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: uiTheme.spacing.s8,
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    gap: 14,
   },
-  optionButton: {
-    minHeight: 40,
-    borderRadius: uiTheme.radius.large,
-    backgroundColor: uiTheme.colors.card,
+  recentIconWrap: {
+    width: 58,
+    height: 58,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: uiTheme.colors.divider,
+    borderColor: '#58C7C2',
+    backgroundColor: 'rgba(88,199,194,0.2)',
+    alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: uiTheme.spacing.s12,
   },
-  optionSelected: {
-    borderColor: uiTheme.status.warning,
-    backgroundColor: uiTheme.colors.background,
+  recentInfo: {
+    flex: 1,
   },
-  optionText: {
-    ...uiTheme.typography.caption,
-    color: uiTheme.colors.textPrimary,
+  recentName: {
+    fontFamily: 'Pretendard-Bold',
+    fontSize: 18,
+    color: '#0D2B2A',
   },
-  optionTextSelected: {
-    color: uiTheme.status.warning,
+  recentHint: {
+    marginTop: 4,
+    fontFamily: 'Pretendard-Bold',
+    fontSize: 14,
+    color: '#6F8F90',
   },
-  previewSection: {
-    borderRadius: uiTheme.radius.large,
-    backgroundColor: uiTheme.colors.card,
-    borderWidth: 1,
-    borderColor: uiTheme.colors.divider,
-    padding: uiTheme.spacing.s16,
-    gap: uiTheme.spacing.s4,
+  recentTime: {
+    fontFamily: 'Pretendard-Bold',
+    fontSize: 18,
+    color: '#0D2B2A',
   },
-  bottomFixed: {
-    marginTop: uiTheme.spacing.s12,
-    gap: uiTheme.spacing.s12,
-    paddingTop: uiTheme.spacing.s12,
+  searchButton: {
+    marginTop: 4,
+    minHeight: 62,
+    borderRadius: 999,
+    backgroundColor: '#58C7C2',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#34B6AE',
+    shadowOpacity: 0.6,
+    shadowOffset: { width: 0, height: 8 },
+    shadowRadius: 13,
+    elevation: 6,
   },
-  previewTitle: {
-    ...uiTheme.typography.body,
-    color: uiTheme.colors.textPrimary,
-    fontWeight: '600',
-  },
-  previewItem: {
-    ...uiTheme.typography.body,
-    color: uiTheme.colors.textSecondary,
+  searchButtonText: {
+    fontFamily: 'Pretendard-Bold',
+    fontSize: 18,
+    color: '#FFFFFF',
   },
 });

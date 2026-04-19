@@ -9,9 +9,24 @@ import {
 } from 'react-native-webview';
 import type { MapCoordinate } from '../types';
 import { buildKakaoMapHtml } from './html';
-import type { KakaoMapWebViewEvent, KakaoMapWebViewHandle, KakaoMapWebViewProps } from './types';
+import type { KakaoMapWebViewEvent, KakaoMapWebViewHandle, KakaoMapWebViewProps, MapCenterSource } from './types';
 
-const WEBVIEW_BASE_URL = process.env.EXPO_PUBLIC_KAKAO_WEBVIEW_BASE_URL ?? 'http://localhost:8080';
+function resolveWebViewBaseUrl() {
+  const raw = process.env.EXPO_PUBLIC_KAKAO_WEBVIEW_BASE_URL ?? 'http://localhost:8080';
+
+  try {
+    const parsed = new URL(raw);
+    if (!parsed.protocol || !parsed.hostname) {
+      throw new Error('invalid base url');
+    }
+
+    return parsed.toString();
+  } catch {
+    return 'http://localhost:8080';
+  }
+}
+
+const WEBVIEW_BASE_URL = resolveWebViewBaseUrl();
 
 function parseMessage(event: WebViewMessageEvent): KakaoMapWebViewEvent | null {
   try {
@@ -25,22 +40,25 @@ function parseMessage(event: WebViewMessageEvent): KakaoMapWebViewEvent | null {
   }
 }
 
-function buildMoveToScript(coordinate: MapCoordinate): string {
-  return `window.moveTo && window.moveTo(${coordinate.lat}, ${coordinate.lng}); true;`;
+function buildMoveToScript(coordinate: MapCoordinate & { source?: MapCenterSource }): string {
+  const source = coordinate.source ? `'${coordinate.source}'` : 'undefined';
+  return `window.moveTo && window.moveTo(${coordinate.lat}, ${coordinate.lng}, ${source}); true;`;
 }
 
 export const KakaoMapWebView = forwardRef<KakaoMapWebViewHandle, KakaoMapWebViewProps>(
-  function KakaoMapWebView({ apiKey, initialCenter, initialMarker, style, onEvent }, ref) {
+  function KakaoMapWebView({ jsApiKey, initialCenter, initialMarker, style, onEvent }, ref) {
     const webViewRef = useRef<WebView>(null);
+    const initialCenterRef = useRef(initialCenter);
+    const initialMarkerRef = useRef(initialMarker);
 
     const html = useMemo(
       () =>
         buildKakaoMapHtml({
-          apiKey,
-          initialCenter,
-          initialMarker,
+          jsApiKey,
+          initialCenter: initialCenterRef.current,
+          initialMarker: initialMarkerRef.current,
         }),
-      [apiKey, initialCenter, initialMarker],
+      [jsApiKey],
     );
 
     useImperativeHandle(

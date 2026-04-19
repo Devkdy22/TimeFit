@@ -34,6 +34,11 @@ export class AppConfigService {
     return this.configService.get('KAKAO_API_KEY', { infer: true });
   }
 
+  get kakaoRestApiKey() {
+    const restApiKey = this.configService.get('KAKAO_REST_API_KEY', { infer: true });
+    return restApiKey || this.kakaoApiKey;
+  }
+
   get trafficApiKey() {
     return this.configService.get('TRAFFIC_API_KEY', { infer: true });
   }
