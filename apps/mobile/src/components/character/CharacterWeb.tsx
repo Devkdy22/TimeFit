@@ -31,7 +31,9 @@ export function Character({ size = 220, tone = 'mint', state = 'idle' }: Charact
 
   const setFocusByTouch = (locationX: number, locationY: number) => {
     const nx = clamp((locationX - size * 0.5) / (size * 0.34), -1, 1);
-    const ny = clamp((locationY - size * 0.45) / (size * 0.34), -1, 1);
+    const nyOffset = locationY - size * 0.45;
+    // Upward drag needed stronger response than downward on-device.
+    const ny = clamp(nyOffset / (nyOffset < 0 ? size * 0.28 : size * 0.34), -1, 1);
     faceFocusX.setValue(nx);
     faceFocusY.setValue(ny);
   };
@@ -87,7 +89,7 @@ export function Character({ size = 220, tone = 'mint', state = 'idle' }: Charact
           const magnitude = clamp(Math.sqrt(dx * dx + dy * dy) / 58, 0, 1);
           setFocusByTouch(evt.nativeEvent.locationX, evt.nativeEvent.locationY);
           facePullX.setValue(clamp(dx / 70, -1, 1));
-          facePullY.setValue(clamp(dy / 70, -1, 1));
+          facePullY.setValue(clamp(dy / (dy < 0 ? 58 : 70), -1, 1));
           headTilt.setValue(clamp(dx * 0.05, -3.2, 3.2));
           faceDepth.setValue(0.08 + magnitude * 0.5);
         },

@@ -21,6 +21,7 @@ interface CommutePlanContextValue {
   latestSelectedPlace: SavedPlace | null;
   setArrivalAt: (time: string | null) => void;
   applyPlaceToField: (field: LocationField, place: SavedPlace) => void;
+  clearPlaceField: (field: LocationField) => void;
   saveLatestPlace: (name: string) => SavedPlace | null;
 }
 
@@ -126,6 +127,13 @@ export function CommutePlanProvider({ children }: { children: ReactNode }) {
         }
 
         setDestination(place);
+      },
+      clearPlaceField: (field) => {
+        if (field === 'origin') {
+          setOrigin(null);
+          return;
+        }
+        setDestination(null);
       },
       saveLatestPlace: (name) => {
         const trimmedName = name.trim();

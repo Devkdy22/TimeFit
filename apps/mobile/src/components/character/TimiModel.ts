@@ -8,6 +8,7 @@ export interface TimiPartTransforms {
   bodyTranslateY: number;
   leftArmRotateDeg: number;
   rightArmRotateDeg: number;
+  rightArmTranslateY: number;
   gazeX: number;
 }
 
@@ -17,6 +18,7 @@ export const TIMI_PART_DEFAULT_TRANSFORMS: TimiPartTransforms = {
   bodyTranslateY: 0,
   leftArmRotateDeg: -8,
   rightArmRotateDeg: 8,
+  rightArmTranslateY: 0,
   gazeX: 0,
 };
 

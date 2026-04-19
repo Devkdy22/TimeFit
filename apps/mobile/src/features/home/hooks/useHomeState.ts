@@ -25,7 +25,7 @@ function parseClockToFutureMinutes(value: string | null) {
 }
 
 export function useHomeState() {
-  const { origin, destination, arrivalAt, recentPlaces, savedPlaces } = useCommutePlan();
+  const { origin, destination, arrivalAt, recentPlaces, savedPlaces, setArrivalAt } = useCommutePlan();
 
   const minutesUntilArrival = useMemo(() => parseClockToFutureMinutes(arrivalAt), [arrivalAt]);
   const apiStatus = minutesUntilArrival <= 30 ? '긴급' : minutesUntilArrival <= 50 ? '주의' : '여유';
@@ -50,5 +50,6 @@ export function useHomeState() {
     savedPlaces,
     recentPlaces,
     routinePreview: routineItems.slice(0, 2),
+    setArrivalAt,
   };
 }

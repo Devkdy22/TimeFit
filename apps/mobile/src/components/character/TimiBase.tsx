@@ -84,7 +84,7 @@ function buildBlobGeometry(
   const pullStrength = clamp(Math.sqrt(px * px + py * py), 0, 1);
   const hasFocus = Math.abs(fx) > 0.02 || Math.abs(fy) > 0.02;
   const focusAngle = hasFocus ? Math.atan2(fy, fx) : Math.atan2(py || 0.0001, px || 1);
-  const sigma = 0.26;
+  const sigma = 0.22;
 
   const shortestAngleDiff = (a: number, b: number) => {
     let diff = a - b;
@@ -103,8 +103,11 @@ function buildBlobGeometry(
     const opposite = Math.exp(
       -(oppositeDiff * oppositeDiff) / (2 * (sigma * 1.75) * (sigma * 1.75)),
     );
-    const localWarp = pullStrength * (0.08 + d * 0.14) * local;
-    const oppositeWarp = pullStrength * (0.03 + d * 0.06) * opposite;
+    const upwardPull = Math.max(0, -py);
+    const topRegion = Math.max(0, -Math.sin(angle));
+    const topBoost = upwardPull * topRegion * (0.06 + d * 0.08);
+    const localWarp = pullStrength * (0.08 + d * 0.14) * local + topBoost * local;
+    const oppositeWarp = pullStrength * (0.03 + d * 0.06) * opposite * (1 - upwardPull * 0.35);
 
     const warped = radius * (1 + baseWarp + localWarp - oppositeWarp);
     return clamp(warped, radius * 0.84, radius * 1.36);
@@ -199,11 +202,19 @@ export function LeftArmPart({ palette, rotateDeg }: { palette: TimiPalette; rota
   );
 }
 
-export function RightArmPart({ palette, rotateDeg }: { palette: TimiPalette; rotateDeg: number }) {
+export function RightArmPart({
+  palette,
+  rotateDeg,
+  translateY,
+}: {
+  palette: TimiPalette;
+  rotateDeg: number;
+  translateY: number;
+}) {
   const { x, y } = TIMI_TRANSFORM_ORIGIN.rightArm;
   return (
-    <G id="rightArm" transform={`rotate(${rotateDeg} ${x} ${y})`}>
-      <Ellipse cx="95" cy="55" rx="7.5" ry="5.5" fill={palette.body} />
+    <G id="rightArm" transform={`translate(0 ${translateY}) rotate(${rotateDeg} ${x} ${y})`}>
+      <Ellipse cx="106" cy="55" rx="7.5" ry="5.5" fill={palette.body} />
     </G>
   );
 }
@@ -335,7 +346,11 @@ export function TimiBase({
       ) : null}
       <BodyPart palette={palette} translateY={next.bodyTranslateY} />
       <LeftArmPart palette={palette} rotateDeg={next.leftArmRotateDeg} />
-      <RightArmPart palette={palette} rotateDeg={next.rightArmRotateDeg} />
+      <RightArmPart
+        palette={palette}
+        rotateDeg={next.rightArmRotateDeg}
+        translateY={next.rightArmTranslateY}
+      />
       <HeadPart
         palette={palette}
         rotateDeg={next.headRotateDeg}

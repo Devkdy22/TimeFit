@@ -80,14 +80,26 @@ export function useTimiAnimation({ mood, interaction, signal }: UseTimiAnimation
   }, [floatY, mood, swayDeg]);
 
   useEffect(() => {
-    const phaseTimer = setInterval(() => {
-      setPhase((prev) => {
-        const next = prev + 0.12;
-        return next > Math.PI * 2 ? next - Math.PI * 2 : next;
-      });
-    }, 50);
+    let frameId = 0;
+    let previousTs = 0;
+    const angularVelocity = (Math.PI * 2) / 2200;
 
-    return () => clearInterval(phaseTimer);
+    const tick = (timestamp: number) => {
+      if (previousTs === 0) {
+        previousTs = timestamp;
+      }
+
+      const deltaMs = timestamp - previousTs;
+      previousTs = timestamp;
+
+      // Keep phase continuous (no 2π wrapping) so mixed-frequency waves stay smooth.
+      setPhase((prev) => prev + deltaMs * angularVelocity);
+
+      frameId = requestAnimationFrame(tick);
+    };
+
+    frameId = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frameId);
   }, []);
 
   useEffect(() => {
@@ -170,26 +182,42 @@ export function useTimiAnimation({ mood, interaction, signal }: UseTimiAnimation
     const wave = Math.sin(phase);
     const secondaryWave = Math.sin(phase * 1.4 + 0.8);
 
+    if (interaction === 'none') {
+      return {
+        headRotateDeg: clamp(wave * 0.8, -4, 4),
+        bodyTranslateY: 0,
+        leftArmRotateDeg: -10,
+        // Keep the arm beside the face and make it feel like a vertical wave.
+        rightArmRotateDeg: clamp(-22 + secondaryWave * 3.8, -28, -14),
+        rightArmTranslateY: clamp(secondaryWave * 3.2, -3.2, 3.2),
+        eyesScaleY: clamp(blink, 0.14, 1.05),
+      };
+    }
+
     return {
       headRotateDeg: clamp(wave * 2.2 + interactionBoost.head, -11, 11),
       bodyTranslateY: wave * 1.8,
       leftArmRotateDeg: clamp(-8 + secondaryWave * 4 + interactionBoost.leftArm, -28, 16),
       rightArmRotateDeg: clamp(8 - secondaryWave * 4 + interactionBoost.rightArm, -16, 28),
+      rightArmTranslateY: 0,
       eyesScaleY: clamp(blink * interactionBoost.eyes, 0.14, 1.15),
     };
-  }, [blink, interactionBoost, phase]);
+  }, [blink, interaction, interactionBoost, phase]);
 
   const containerStyle = {
-    transform: [
-      { translateY: floatY },
-      {
-        rotate: swayDeg.interpolate({
-          inputRange: [-20, 20],
-          outputRange: ['-20deg', '20deg'],
-        }),
-      },
-      { scale },
-    ],
+    transform:
+      interaction === 'none'
+        ? [{ scale }]
+        : [
+            { translateY: floatY },
+            {
+              rotate: swayDeg.interpolate({
+                inputRange: [-20, 20],
+                outputRange: ['-20deg', '20deg'],
+              }),
+            },
+            { scale },
+          ],
   };
 
   return {
@@ -201,5 +229,6 @@ export function useTimiAnimation({ mood, interaction, signal }: UseTimiAnimation
     bodyTranslateY: partMotion.bodyTranslateY,
     leftArmRotateDeg: partMotion.leftArmRotateDeg,
     rightArmRotateDeg: partMotion.rightArmRotateDeg,
+    rightArmTranslateY: partMotion.rightArmTranslateY,
   };
 }

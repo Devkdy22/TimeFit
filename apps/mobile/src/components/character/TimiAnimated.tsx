@@ -31,6 +31,7 @@ export function TimiAnimated({ status, size = 118, mood, interaction, signal }: 
     bodyTranslateY,
     leftArmRotateDeg,
     rightArmRotateDeg,
+    rightArmTranslateY,
   } = useTimiAnimation({ mood, interaction, signal });
 
   return (
@@ -45,6 +46,7 @@ export function TimiAnimated({ status, size = 118, mood, interaction, signal }: 
         bodyTranslateY={bodyTranslateY}
         leftArmRotateDeg={leftArmRotateDeg}
         rightArmRotateDeg={rightArmRotateDeg}
+        rightArmTranslateY={rightArmTranslateY}
       />
     </Animated.View>
   );

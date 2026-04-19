@@ -13,6 +13,7 @@ export interface TimiProps {
   bodyTranslateY?: number;
   leftArmRotateDeg?: number;
   rightArmRotateDeg?: number;
+  rightArmTranslateY?: number;
   facePullX?: number;
   facePullY?: number;
   faceDepth?: number;
@@ -31,6 +32,7 @@ export function Timi({
   bodyTranslateY = 0,
   leftArmRotateDeg = -8,
   rightArmRotateDeg = 8,
+  rightArmTranslateY = 0,
   facePullX = 0,
   facePullY = 0,
   faceDepth = 0,
@@ -45,6 +47,7 @@ export function Timi({
     bodyTranslateY,
     leftArmRotateDeg,
     rightArmRotateDeg,
+    rightArmTranslateY,
   };
 
   return (
