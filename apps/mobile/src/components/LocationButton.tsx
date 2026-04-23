@@ -1,26 +1,30 @@
 import React from 'react';
-import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 interface LocationButtonProps {
-  loading: boolean;
+  isLoading: boolean;
+  error: string | null;
   onPress: () => void;
   onRetry: () => void;
-  error: string | null;
+  onOpenSettings?: () => void;
 }
 
-export function LocationButton({ loading, onPress, onRetry, error }: LocationButtonProps) {
+export function LocationButton({ isLoading, error, onPress, onRetry, onOpenSettings }: LocationButtonProps) {
+  const shouldShowSettingsButton =
+    !!error && error.includes('위치 권한이 필요합니다') && Platform.OS === 'android';
+
   return (
     <View style={styles.wrapper}>
       <Pressable
-        disabled={loading}
+        disabled={isLoading}
         onPress={onPress}
         style={({ pressed }) => [
           styles.button,
-          loading ? styles.buttonDisabled : null,
-          pressed && !loading ? styles.buttonPressed : null,
+          isLoading ? styles.buttonDisabled : null,
+          pressed && !isLoading ? styles.buttonPressed : null,
         ]}
       >
-        {loading ? (
+        {isLoading ? (
           <View style={styles.row}>
             <ActivityIndicator size="small" color="#FFFFFF" />
             <Text style={styles.buttonText}>현재 위치 확인 중...</Text>
@@ -33,10 +37,23 @@ export function LocationButton({ loading, onPress, onRetry, error }: LocationBut
       {error ? (
         <View style={styles.errorBox}>
           <Text style={styles.errorText}>{error}</Text>
-          <Pressable onPress={onRetry} style={styles.retryButton}>
-            <Text style={styles.retryText}>재시도</Text>
-          </Pressable>
+          <View style={styles.errorActions}>
+            <Pressable onPress={onRetry} style={styles.retryButton}>
+              <Text style={styles.retryText}>재시도</Text>
+            </Pressable>
+            {shouldShowSettingsButton ? (
+              <Pressable onPress={onOpenSettings} style={styles.settingsButton}>
+                <Text style={styles.settingsText}>설정 열기</Text>
+              </Pressable>
+            ) : null}
+          </View>
         </View>
+      ) : null}
+
+      {Platform.OS === 'web' ? (
+        <Text style={styles.webHint}>
+          웹에서는 브라우저 위치 권한 허용이 필요하며, HTTPS(또는 localhost) 환경에서만 동작합니다.
+        </Text>
       ) : null}
     </View>
   );
@@ -83,8 +100,11 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  errorActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
   retryButton: {
-    alignSelf: 'flex-start',
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 8,
@@ -94,5 +114,21 @@ const styles = StyleSheet.create({
     color: '#B42318',
     fontWeight: '700',
     fontSize: 12,
+  },
+  settingsButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#E4ECFF',
+  },
+  settingsText: {
+    color: '#1D4ED8',
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  webHint: {
+    color: '#475569',
+    fontSize: 12,
+    lineHeight: 18,
   },
 });

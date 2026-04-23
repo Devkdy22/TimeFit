@@ -8,6 +8,7 @@ type MapCenter = {
   lng: number;
   address?: string;
   source: MapCenterSource;
+  accuracy?: number;
 };
 
 interface KakaoMapCrossPlatformProps {
@@ -267,6 +268,16 @@ function isSameCenter(a: Pick<MapCenter, 'lat' | 'lng'>, b: Pick<MapCenter, 'lat
   return Math.abs(a.lat - b.lat) <= epsilon && Math.abs(a.lng - b.lng) <= epsilon;
 }
 
+function toMetersDistance(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const dLat = (lat2 - lat1) * 111000;
+  const dLng = (lng2 - lng1) * 111000 * Math.cos((lat1 * Math.PI) / 180);
+  return Math.sqrt(dLat * dLat + dLng * dLng);
+}
+
+function isLikelyRoadAddress(address: string) {
+  return /(?:대로|로|길)\s*\d+/u.test(address);
+}
+
 function parseJibunParts(jibunAddress: string): { region: string; lotMain: string } | null {
   const trimmed = jibunAddress.trim();
   if (!trimmed) {
@@ -332,16 +343,31 @@ export function KakaoMapCrossPlatform({
   const latestCenterPropRef = useRef<MapCenter>(center);
   const onCenterChangeRef = useRef(onCenterChange);
   const onGeocodeResultRef = useRef(onGeocodeResult);
+  const latestRestGeocodeRef = useRef<{ roadAddress: string | null; jibunAddress: string | null } | null>(
+    null,
+  );
   const initSeqRef = useRef(0);
   const isMountedRef = useRef(true);
   const pendingNativeMoveRef = useRef<MapCenter | null>(null);
   const nativeInitialCenterRef = useRef<MapCenter | null>(null);
   const pendingProgrammaticSourceRef = useRef<MapCenterSource | null>(null);
-  const gpsCenterAppliedRef = useRef(false);
 
   onCenterChangeRef.current = onCenterChange;
   onGeocodeResultRef.current = onGeocodeResult;
   latestCenterPropRef.current = center;
+
+  useEffect(() => {
+    if (center.source !== 'gps' || !center.address?.trim()) {
+      return;
+    }
+
+    const trimmedAddress = center.address.trim();
+    const roadAddress = isLikelyRoadAddress(trimmedAddress) ? trimmedAddress : null;
+    latestRestGeocodeRef.current = {
+      roadAddress,
+      jibunAddress: roadAddress ? null : trimmedAddress,
+    };
+  }, [center.source, center.address]);
 
   if (!nativeInitialCenterRef.current) {
     nativeInitialCenterRef.current = {
@@ -512,12 +538,38 @@ export function KakaoMapCrossPlatform({
                 representativeJibun,
               });
 
-              onCenterChangeRef.current({ lat, lng, address, source: resolvedSource });
+              const isGpsSource =
+                resolvedSource === 'gps' ||
+                reason === 'init' ||
+                reason === 'programmatic';
+
+              const gpsLat = latestCenterPropRef.current.lat;
+              const gpsLng = latestCenterPropRef.current.lng;
+              const gpsAccuracy = latestCenterPropRef.current.accuracy ?? 0;
+              const distanceMeters = toMetersDistance(gpsLat, gpsLng, lat, lng);
+              const shouldSnapToGeocoder =
+                isGpsSource &&
+                gpsAccuracy > 20 &&
+                distanceMeters < 30;
+
+              const emitLat = isGpsSource && !shouldSnapToGeocoder ? gpsLat : lat;
+              const emitLng = isGpsSource && !shouldSnapToGeocoder ? gpsLng : lng;
+              const restAddress = latestRestGeocodeRef.current;
+              const finalRoadAddress = restAddress?.roadAddress || roadAddress || null;
+              const finalJibunAddress = restAddress?.jibunAddress || jibunAddress || null;
+
+              onCenterChangeRef.current({
+                lat: emitLat,
+                lng: emitLng,
+                address,
+                source: resolvedSource,
+                accuracy: latestCenterPropRef.current.accuracy,
+              });
               onGeocodeResultRef.current?.({
-                lat,
-                lng,
-                roadAddress: roadAddress ?? null,
-                jibunAddress: jibunAddress ?? null,
+                lat: emitLat,
+                lng: emitLng,
+                roadAddress: finalRoadAddress,
+                jibunAddress: finalJibunAddress,
                 representativeJibun,
               });
               pendingProgrammaticSourceRef.current = null;
@@ -527,12 +579,38 @@ export function KakaoMapCrossPlatform({
                 return;
               }
 
-              onCenterChangeRef.current({ lat, lng, address, source: resolvedSource });
+              const isGpsSource =
+                resolvedSource === 'gps' ||
+                reason === 'init' ||
+                reason === 'programmatic';
+
+              const gpsLat = latestCenterPropRef.current.lat;
+              const gpsLng = latestCenterPropRef.current.lng;
+              const gpsAccuracy = latestCenterPropRef.current.accuracy ?? 0;
+              const distanceMeters = toMetersDistance(gpsLat, gpsLng, lat, lng);
+              const shouldSnapToGeocoder =
+                isGpsSource &&
+                gpsAccuracy > 20 &&
+                distanceMeters < 30;
+
+              const emitLat = isGpsSource && !shouldSnapToGeocoder ? gpsLat : lat;
+              const emitLng = isGpsSource && !shouldSnapToGeocoder ? gpsLng : lng;
+              const restAddress = latestRestGeocodeRef.current;
+              const finalRoadAddress = restAddress?.roadAddress || roadAddress || null;
+              const finalJibunAddress = restAddress?.jibunAddress || jibunAddress || null;
+
+              onCenterChangeRef.current({
+                lat: emitLat,
+                lng: emitLng,
+                address,
+                source: resolvedSource,
+                accuracy: latestCenterPropRef.current.accuracy,
+              });
               onGeocodeResultRef.current?.({
-                lat,
-                lng,
-                roadAddress: roadAddress ?? null,
-                jibunAddress: jibunAddress ?? null,
+                lat: emitLat,
+                lng: emitLng,
+                roadAddress: finalRoadAddress,
+                jibunAddress: finalJibunAddress,
                 representativeJibun: null,
               });
               pendingProgrammaticSourceRef.current = null;
@@ -622,14 +700,6 @@ export function KakaoMapCrossPlatform({
         return;
       }
 
-      if (gpsCenterAppliedRef.current) {
-        logMap('setCenter skipped', {
-          source: center.source,
-          reason: 'native gps already applied once',
-        });
-        return;
-      }
-
       logMap('setCenter called', {
         source: center.source,
         reason: 'native center effect',
@@ -638,7 +708,6 @@ export function KakaoMapCrossPlatform({
       });
       pendingNativeMoveRef.current = { lat: center.lat, lng: center.lng, address: center.address, source: center.source };
       nativeMapRef.current?.moveTo({ lat: center.lat, lng: center.lng, source: center.source });
-      gpsCenterAppliedRef.current = true;
       return;
     }
 
@@ -661,14 +730,6 @@ export function KakaoMapCrossPlatform({
       return;
     }
 
-    if (gpsCenterAppliedRef.current) {
-      logMap('setCenter skipped', {
-        source: center.source,
-        reason: 'web gps already applied once',
-      });
-      return;
-    }
-
     logMap('setCenter called', {
       source: center.source,
       reason: 'web center effect',
@@ -679,7 +740,6 @@ export function KakaoMapCrossPlatform({
     const next = new window.kakao.maps.LatLng(center.lat, center.lng);
     mapRef.current.setCenter(next);
     markerRef.current.setPosition(next);
-    gpsCenterAppliedRef.current = true;
   }, [center.lat, center.lng, center.address, center.source]);
 
   if (Platform.OS === 'web') {
@@ -721,6 +781,16 @@ export function KakaoMapCrossPlatform({
       return;
     }
 
+    const derivedSource = event.source ?? (event.reason === 'init' ? 'init' : 'user');
+    const shouldLockToGpsCenter =
+      derivedSource === 'gps' || event.reason === 'init' || event.reason === 'programmatic';
+    const isCurrentLocationMarker = latestCenterPropRef.current.source === 'gps';
+
+    // GPS 원본 좌표를 단일 진실 소스로 유지한다.
+    // geocoder가 반환한 좌표는 주소 텍스트 보정 용도로만 사용한다.
+    const lockedLat = shouldLockToGpsCenter ? latestCenterPropRef.current.lat : event.lat;
+    const lockedLng = shouldLockToGpsCenter ? latestCenterPropRef.current.lng : event.lng;
+
     if (isSameCenter(event, latestCenterPropRef.current, 0.00005)) {
       return;
     }
@@ -731,15 +801,32 @@ export function KakaoMapCrossPlatform({
       return;
     }
 
+    // 현재 위치 마커는 geocoder/init/programmatic 콜백에서 좌표를 변경하지 않는다.
+    // GPS 원본 좌표는 apply current location once 단계에서만 반영한다.
+    if (shouldLockToGpsCenter || isCurrentLocationMarker) {
+      const restHasRoadAddress = Boolean(latestRestGeocodeRef.current?.roadAddress);
+      // 핀 좌표는 절대 변경하지 않되, REST 도로명 부재 시 JS 도로명을 주소 폴백으로 반영한다.
+      if (!restHasRoadAddress && event.roadAddress) {
+        onGeocodeResultRef.current?.({
+          lat: lockedLat,
+          lng: lockedLng,
+          roadAddress: event.roadAddress,
+          jibunAddress: event.jibunAddress ?? null,
+          representativeJibun: event.representativeJibun ?? null,
+        });
+      }
+      return;
+    }
+
     onCenterChange({
-      lat: event.lat,
-      lng: event.lng,
+      lat: lockedLat,
+      lng: lockedLng,
       address: event.address,
-      source: event.source ?? (event.reason === 'init' ? 'init' : 'user'),
+      source: derivedSource,
     });
     onGeocodeResultRef.current?.({
-      lat: event.lat,
-      lng: event.lng,
+      lat: lockedLat,
+      lng: lockedLng,
       roadAddress: event.roadAddress ?? null,
       jibunAddress: event.jibunAddress ?? null,
       representativeJibun: event.representativeJibun ?? null,

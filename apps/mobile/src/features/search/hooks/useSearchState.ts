@@ -9,6 +9,7 @@ type MapCenterState = {
   lng: number;
   address: string;
   source: MapCenterSource;
+  accuracy?: number;
 };
 
 const DEFAULT_MAP_CENTER: MapCenterState = {
@@ -69,6 +70,7 @@ function toManualPlace(text: string, center: MapCenterState): SavedPlace {
     address: center.address,
     latitude: center.lat,
     longitude: center.lng,
+    accuracy: center.accuracy,
     iconType: inferPlaceIconType(trimmed),
   };
 }
@@ -129,6 +131,8 @@ export function useSearchState() {
   const [activeField, setActiveField] = useState<LocationField>('destination');
   const [originInput, setOriginInput] = useState(origin?.name ?? '');
   const [destinationInput, setDestinationInput] = useState(destination?.name ?? '');
+  const [isOriginFocused, setIsOriginFocused] = useState(false);
+  const [isDestinationFocused, setIsDestinationFocused] = useState(false);
   const [mapQuery, setMapQuery] = useState('');
 
   const [mapSearchResults, setMapSearchResults] = useState<SavedPlace[]>(fallbackSearchPlaces.slice(0, 4));
@@ -196,12 +200,19 @@ export function useSearchState() {
   }, [destination, origin, recentPlaces, savedPlaces]);
 
   useEffect(() => {
+    // 출발지 입력 중(또는 출발지가 활성 탭)에는 외부 상태로 입력값을 덮어쓰지 않는다.
+    if (isOriginFocused || activeField === 'origin') {
+      return;
+    }
     setOriginInput(origin?.name ?? '');
-  }, [origin?.name]);
+  }, [origin?.name, isOriginFocused, activeField]);
 
   useEffect(() => {
+    if (isDestinationFocused || activeField === 'destination') {
+      return;
+    }
     setDestinationInput(destination?.name ?? '');
-  }, [destination?.name]);
+  }, [destination?.name, isDestinationFocused, activeField]);
 
   useEffect(() => {
     const target = activeField === 'origin' ? origin : destination;
@@ -222,6 +233,7 @@ export function useSearchState() {
         lng: target.longitude,
         address: target.address,
         source: inferCenterSourceFromPlace(target),
+        accuracy: target.accuracy,
       };
     });
   }, [activeField, origin, destination]);
@@ -338,6 +350,25 @@ export function useSearchState() {
     applyPlaceToField(field, toManualPlace(typedValue, mapCenter));
   };
 
+  const handleSelectField = (field: LocationField) => {
+    if (field === 'origin') {
+      setIsOriginFocused(true);
+      setActiveField(field);
+      return;
+    }
+    setIsDestinationFocused(true);
+    setActiveField(field);
+  };
+
+  const handleBlurField = (field: LocationField) => {
+    if (field === 'origin') {
+      setIsOriginFocused(false);
+    } else {
+      setIsDestinationFocused(false);
+    }
+    applyTypedField(field);
+  };
+
   const selectPlaceToField = (field: LocationField, place: SavedPlace) => {
     applyPlaceToField(field, withNamedId(place));
 
@@ -352,6 +383,7 @@ export function useSearchState() {
       lng: place.longitude,
       address: place.address,
       source: 'search',
+      accuracy: place.accuracy,
     });
   };
 
@@ -374,6 +406,7 @@ export function useSearchState() {
       address: mapCenter.address,
       latitude: mapCenter.lat,
       longitude: mapCenter.lng,
+      accuracy: mapCenter.accuracy,
       iconType: inferPlaceIconType(name),
     };
 
@@ -388,8 +421,9 @@ export function useSearchState() {
     jibunAddress: string | null;
     representativeJibun: string | null;
   }) => {
-    const refinedName = info.representativeJibun || info.jibunAddress || info.roadAddress || null;
-    const refinedAddress = info.jibunAddress || info.roadAddress || refinedName;
+    // 주소 표시는 도로명 > 지번 > 대표지번 순서로 처리한다.
+    const refinedName = info.roadAddress || info.jibunAddress || info.representativeJibun || null;
+    const refinedAddress = info.roadAddress || info.jibunAddress || info.representativeJibun || null;
 
     setGeocodeInfo({
       roadAddress: info.roadAddress,
@@ -412,13 +446,15 @@ export function useSearchState() {
       refinedName &&
       (origin.id.includes('current-location-resolved') || origin.name.trim() === '내 위치')
     ) {
+      // 현재 위치(origin)는 GPS 원본 좌표를 유지하고, 주소/이름 텍스트만 보정한다.
       applyPlaceToField('origin', {
         ...origin,
         id: origin.id,
         name: refinedName,
         address: refinedAddress || origin.address,
-        latitude: info.lat,
-        longitude: info.lng,
+        latitude: origin.latitude,
+        longitude: origin.longitude,
+        accuracy: origin.accuracy,
       });
     }
 
@@ -450,6 +486,8 @@ export function useSearchState() {
     kakaoJsKey,
     setArrivalAt,
     setActiveField,
+    handleSelectField,
+    handleBlurField,
     setOriginInput,
     setDestinationInput,
     setMapQuery,

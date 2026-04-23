@@ -39,6 +39,10 @@ export function buildKakaoMapHtml({
         var geocodeTimer = null;
         var geocodeRequestId = 0;
         var pendingProgrammaticSource = null;
+        var lockedGpsPosition = {
+          lat: ${marker.lat},
+          lng: ${marker.lng},
+        };
 
         var sdkKey = '${jsApiKey}';
         var sdkUrl = 'https://dapi.kakao.com/v2/maps/sdk.js?appkey=' + sdkKey + '&autoload=false&libraries=services';
@@ -72,9 +76,18 @@ export function buildKakaoMapHtml({
         post('MAP_BOOT', { href: String(window.location.href || '') });
 
         function emitMoved(lat, lng, address, roadAddress, jibunAddress, representativeJibun, source, reason) {
+          var emitLat = lat;
+          var emitLng = lng;
+
+          // GPS 소스는 geocoder 좌표 대신 GPS 원본 좌표를 단일 진실 소스로 유지한다.
+          if ((source === 'gps' || reason === 'init' || reason === 'programmatic') && lockedGpsPosition) {
+            emitLat = lockedGpsPosition.lat;
+            emitLng = lockedGpsPosition.lng;
+          }
+
           post('MAP_MOVED', {
-            lat: round6(lat),
-            lng: round6(lng),
+            lat: round6(emitLat),
+            lng: round6(emitLng),
             address: address,
             roadAddress: roadAddress,
             jibunAddress: jibunAddress,
@@ -300,6 +313,9 @@ export function buildKakaoMapHtml({
               }
 
               pendingProgrammaticSource = source || 'gps';
+              if (pendingProgrammaticSource === 'gps') {
+                lockedGpsPosition = { lat: lat, lng: lng };
+              }
 
               var next = new kakao.maps.LatLng(lat, lng);
               map.setCenter(next);

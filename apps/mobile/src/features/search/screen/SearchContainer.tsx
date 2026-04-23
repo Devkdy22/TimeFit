@@ -20,11 +20,11 @@ export function SearchContainer() {
       isSearchingMap={state.isSearchingMap}
       mapCenter={state.mapCenter}
       kakaoJsKey={state.kakaoJsKey}
-      onSelectField={state.setActiveField}
+      onSelectField={state.handleSelectField}
       onChangeArrivalAt={state.setArrivalAt}
       onChangeOriginInput={state.setOriginInput}
       onChangeDestinationInput={state.setDestinationInput}
-      onBlurField={state.applyTypedField}
+      onBlurField={state.handleBlurField}
       onChangeMapQuery={state.setMapQuery}
       onSelectMapResult={state.selectPlaceForActiveField}
       onSelectRecentDestination={state.selectRecentDestination}

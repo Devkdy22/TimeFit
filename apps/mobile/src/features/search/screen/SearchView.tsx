@@ -1,6 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useState } from 'react';
 import {
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -24,6 +26,7 @@ type MapCenterState = {
   lng: number;
   address: string;
   source: MapCenterSource;
+  accuracy?: number;
 };
 
 export interface SearchViewProps {
@@ -66,12 +69,10 @@ function toMeridiemClock(value: string) {
   const minute = Number(minuteText);
 
   if (Number.isNaN(hour) || Number.isNaN(minute)) {
-    return 'PM 07:00';
+    return '19:00';
   }
 
-  const period = hour >= 12 ? 'PM' : 'AM';
-  const clockHour = hour % 12 === 0 ? 12 : hour % 12;
-  return `${period} ${String(clockHour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
 export function SearchView({
@@ -102,6 +103,14 @@ export function SearchView({
   onClose,
 }: SearchViewProps) {
   const [timePickerVisible, setTimePickerVisible] = useState(false);
+  const [isOriginSuggestionExpanded, setIsOriginSuggestionExpanded] = useState(true);
+  const [isDestinationSuggestionExpanded, setIsDestinationSuggestionExpanded] = useState(true);
+  const [localOrigin, setLocalOrigin] = useState(originInput);
+  const [localDestination, setLocalDestination] = useState(destinationInput);
+  const hasSuggestionDropdown = isSearchingFieldSuggestions || fieldSuggestions.length > 0;
+  const isSuggestionOpen =
+    hasSuggestionDropdown &&
+    (activeField === 'origin' ? isOriginSuggestionExpanded : isDestinationSuggestionExpanded);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -116,7 +125,17 @@ export function SearchView({
           <Rect x="0" y="0" width="100%" height="100%" fill="url(#searchBgGradient)" />
         </Svg>
 
-        <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <KeyboardAvoidingView
+          style={styles.keyboardAvoiding}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        >
+          <ScrollView
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            removeClippedSubviews={false}
+          >
           <View style={styles.headerRow}>
             <Pressable
               onPress={onClose}
@@ -127,54 +146,115 @@ export function SearchView({
             <Text style={styles.headerTitle}>경로 검색</Text>
           </View>
 
-          <View style={styles.fieldCard}>
-            <TextInput
-              value={originInput}
-              onFocus={() => onSelectField('origin')}
-              onBlur={() => onBlurField('origin')}
-              onChangeText={onChangeOriginInput}
-              placeholder="출발지 입력"
-              placeholderTextColor="#6F8F90"
-              style={[styles.fieldInput, activeField === 'origin' ? styles.fieldInputActive : null]}
-            />
-            <View style={styles.divider} />
-            <TextInput
-              value={destinationInput}
-              onFocus={() => onSelectField('destination')}
-              onBlur={() => onBlurField('destination')}
-              onChangeText={onChangeDestinationInput}
-              placeholder="도착지 입력"
-              placeholderTextColor="#6F8F90"
-              style={[
-                styles.fieldInput,
-                styles.fieldInputBottom,
-                activeField === 'destination' ? styles.fieldInputActive : null,
-              ]}
-            />
+          <View style={styles.fieldCardWrap}>
+            <View style={styles.fieldCard}>
+              <TextInput
+                value={localOrigin}
+                onBlur={() => {
+                  onChangeOriginInput(localOrigin);
+                  onBlurField('origin');
+                }}
+                onChangeText={(text) => {
+                  setLocalOrigin(text);
+                }}
+                selectTextOnFocus={false}
+                placeholder="출발지 입력"
+                placeholderTextColor="#6F8F90"
+                style={styles.fieldInput}
+              />
+              <Pressable
+                onPress={() => {
+                  onSelectField('origin');
+                  setIsOriginSuggestionExpanded((prev) => !prev);
+                }}
+                style={({ pressed }) => [
+                  styles.suggestionToggleButton,
+                  styles.suggestionToggleButtonOrigin,
+                  { opacity: pressed ? 0.85 : 1 },
+                ]}
+              >
+                <Ionicons
+                  name={
+                    hasSuggestionDropdown && isOriginSuggestionExpanded
+                      ? 'chevron-up-outline'
+                      : 'chevron-down-outline'
+                  }
+                  size={18}
+                  color="#0E2C2C"
+                />
+              </Pressable>
+              <View style={styles.divider} />
+              <TextInput
+                value={localDestination}
+                onBlur={() => {
+                  onChangeDestinationInput(localDestination);
+                  onBlurField('destination');
+                }}
+                onChangeText={(text) => {
+                  setLocalDestination(text);
+                }}
+                selectTextOnFocus={false}
+                placeholder="도착지 입력"
+                placeholderTextColor="#6F8F90"
+                style={[styles.fieldInput, styles.fieldInputBottom]}
+              />
+
+              <Pressable
+                onPress={() => {
+                  onSelectField('destination');
+                  setIsDestinationSuggestionExpanded((prev) => !prev);
+                }}
+                style={({ pressed }) => [
+                  styles.suggestionToggleButton,
+                  styles.suggestionToggleButtonDestination,
+                  { opacity: pressed ? 0.85 : 1 },
+                ]}
+              >
+                <Ionicons
+                  name={
+                    hasSuggestionDropdown && isDestinationSuggestionExpanded
+                      ? 'chevron-up-outline'
+                      : 'chevron-down-outline'
+                  }
+                  size={18}
+                  color="#0E2C2C"
+                />
+              </Pressable>
+            </View>
+
+            {isSearchingFieldSuggestions && isSuggestionOpen ? (
+              <View style={styles.fieldSuggestionDropdown}>
+                <Text style={styles.fieldSuggestionHint}>추천 장소를 불러오는 중...</Text>
+              </View>
+            ) : null}
+
+            {!isSearchingFieldSuggestions && isSuggestionOpen && fieldSuggestions.length > 0 ? (
+              <View style={styles.fieldSuggestionDropdown}>
+                {fieldSuggestions.slice(0, 5).map((place, index) => (
+                  <Pressable
+                    key={`${place.id}-${index}`}
+                    onPress={() => {
+                      onSelectMapResult(place);
+                      if (activeField === 'origin') {
+                        setIsOriginSuggestionExpanded(false);
+                        return;
+                      }
+                      setIsDestinationSuggestionExpanded(false);
+                    }}
+                    style={({ pressed }) => [
+                      styles.fieldSuggestionItem,
+                      { opacity: pressed ? 0.9 : 1 },
+                    ]}
+                  >
+                    <Text style={styles.fieldSuggestionName}>{place.name}</Text>
+                    <Text style={styles.fieldSuggestionAddress} numberOfLines={1}>
+                      {place.address}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            ) : null}
           </View>
-
-          {isSearchingFieldSuggestions ? (
-            <View style={styles.fieldSuggestionPanel}>
-              <Text style={styles.fieldSuggestionHint}>추천 장소를 불러오는 중...</Text>
-            </View>
-          ) : null}
-
-          {!isSearchingFieldSuggestions && fieldSuggestions.length > 0 ? (
-            <View style={styles.fieldSuggestionPanel}>
-              {fieldSuggestions.slice(0, 5).map((place, index) => (
-                <Pressable
-                  key={`${place.id}-${index}`}
-                  onPress={() => onSelectMapResult(place)}
-                  style={({ pressed }) => [styles.fieldSuggestionItem, { opacity: pressed ? 0.9 : 1 }]}
-                >
-                  <Text style={styles.fieldSuggestionName}>{place.name}</Text>
-                  <Text style={styles.fieldSuggestionAddress} numberOfLines={1}>
-                    {place.address}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
-          ) : null}
 
           <Pressable
             onPress={() => setTimePickerVisible(true)}
@@ -196,7 +276,9 @@ export function SearchView({
               style={styles.mapQueryInput}
             />
 
-            {isSearchingMap ? <Text style={styles.searchingText}>카카오 지도 검색 중...</Text> : null}
+            {isSearchingMap ? (
+              <Text style={styles.searchingText}>카카오 지도 검색 중...</Text>
+            ) : null}
 
             <View style={styles.mapResultList}>
               {mapSearchResults.slice(0, 3).map((place, index) => (
@@ -217,13 +299,19 @@ export function SearchView({
               {kakaoJsKey ? (
                 <KakaoMapCrossPlatform
                   jsApiKey={kakaoJsKey}
-                  center={{ lat: mapCenter.lat, lng: mapCenter.lng, address: mapCenter.address, source: mapCenter.source }}
+                  center={{
+                    lat: mapCenter.lat,
+                    lng: mapCenter.lng,
+                    address: mapCenter.address,
+                    source: mapCenter.source,
+                  }}
                   onCenterChange={(next) => {
                     onMapCenterChange({
                       lat: next.lat,
                       lng: next.lng,
                       address: next.address ?? mapCenter.address,
                       source: next.source ?? 'user',
+                      accuracy: next.accuracy ?? mapCenter.accuracy,
                     });
                   }}
                   onGeocodeResult={onGeocodeResult}
@@ -246,7 +334,9 @@ export function SearchView({
               onPress={onApplyMapCenter}
               style={({ pressed }) => [styles.mapApplyButton, { opacity: pressed ? 0.9 : 1 }]}
             >
-              <Text style={styles.mapApplyButtonText}>현재 지도 중심으로 {activeField === 'origin' ? '출발지' : '도착지'} 설정</Text>
+              <Text style={styles.mapApplyButtonText}>
+                현재 지도 중심으로 {activeField === 'origin' ? '출발지' : '도착지'} 설정
+              </Text>
             </Pressable>
           </View>
 
@@ -276,7 +366,8 @@ export function SearchView({
           >
             <Text style={styles.searchButtonText}>경로 검색</Text>
           </Pressable>
-        </ScrollView>
+          </ScrollView>
+        </KeyboardAvoidingView>
 
         <HomeTabBar status="relaxed" />
       </View>
@@ -301,6 +392,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F7F8',
   },
   screen: {
+    flex: 1,
+  },
+  keyboardAvoiding: {
     flex: 1,
   },
   scrollContent: {
@@ -344,31 +438,59 @@ const styles = StyleSheet.create({
     shadowRadius: 13,
     elevation: 5,
   },
+  fieldCardWrap: {
+    position: 'relative',
+    zIndex: 20,
+  },
   fieldInput: {
     minHeight: 58,
     fontFamily: 'Pretendard-Bold',
     fontSize: 16,
     color: '#0E2C2C',
+    textAlign: 'left',
     paddingHorizontal: 24,
+    paddingRight: 56,
   },
   fieldInputBottom: {
     borderTopWidth: 1,
     borderTopColor: '#58C7C2',
   },
-  fieldInputActive: {
-    backgroundColor: 'rgba(88,199,194,0.14)',
-  },
   divider: {
     height: 1,
     backgroundColor: '#58C7C2',
   },
-  fieldSuggestionPanel: {
-    marginTop: -4,
+  fieldSuggestionDropdown: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 6,
     borderRadius: 14,
     backgroundColor: 'rgba(255,255,255,0.95)',
     borderWidth: 1,
     borderColor: '#CDEDEC',
     overflow: 'hidden',
+    zIndex: 30,
+    shadowColor: '#0E2C2C',
+    shadowOpacity: 0.1,
+    shadowOffset: { width: 0, height: 6 },
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  suggestionToggleButton: {
+    position: 'absolute',
+    right: 16,
+    width: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 40,
+  },
+  suggestionToggleButtonOrigin: {
+    top: 14,
+  },
+  suggestionToggleButtonDestination: {
+    bottom: 14,
   },
   fieldSuggestionItem: {
     paddingHorizontal: 12,
