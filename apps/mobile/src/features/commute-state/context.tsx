@@ -9,6 +9,7 @@ export interface SavedPlace {
   address: string;
   latitude: number;
   longitude: number;
+  accuracy?: number;
   iconType: PlaceIconType;
 }
 

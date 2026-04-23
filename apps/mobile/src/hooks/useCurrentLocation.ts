@@ -1,263 +1,193 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Linking, Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import * as Location from 'expo-location';
-import { resolveKakaoAddressFromCoord, type KakaoAddressResult } from '../services/kakaoGeoService';
-
-export const ACCURACY_THRESHOLD = 80; // 수집 기준 정확도 (m)
-export const READINGS_REQUIRED = 3; // 평균 계산에 필요한 최소 측위 횟수
-export const TIMEOUT_MS = 15000; // 측위 타임아웃
-
-const WEB_ACCURACY_THRESHOLD = 120;
-
-export interface LocationReading {
-  latitude: number;
-  longitude: number;
-  accuracy: number;
-  timestamp: number;
-}
-
-export interface LocationResult {
-  latitude: number;
-  longitude: number;
-  accuracy: number;
-  readings: LocationReading[];
-  roadAddress: string | null;
-  jibunAddress: string | null;
-  displayAddress: string;
-}
+import type { LocationReading, LocationResult } from '../types/location';
+import {
+  ACCURACY_THRESHOLD,
+  READINGS_REQUIRED,
+  TIMEOUT_MS,
+  calculateAverageLocation,
+  filterReadingsByAccuracy,
+  pickTopNByAccuracy,
+} from '../utils/locationUtils';
+import { resolveKakaoAddressFromCoord } from '../services/kakaoGeoService';
 
 interface UseCurrentLocationState {
   location: LocationResult | null;
-  loading: boolean;
+  isLoading: boolean;
   error: string | null;
-  permissionGranted: boolean;
+  accuracy: number | null;
 }
 
-function getAccuracyThresholdByPlatform() {
-  return Platform.OS === 'web' ? WEB_ACCURACY_THRESHOLD : ACCURACY_THRESHOLD;
+function mapGeolocationErrorCode(code?: number): string {
+  if (code === 1) {
+    return '위치 권한이 필요합니다. 설정에서 허용해주세요.';
+  }
+  if (code === 2) {
+    return '위치 신호를 찾을 수 없습니다.';
+  }
+  if (code === 3) {
+    return '위치 측위 시간이 초과되었습니다.';
+  }
+  return '위치 신호를 찾을 수 없습니다.';
 }
 
-function toFriendlyErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    if (error.message.includes('permission')) {
-      return '위치 권한이 필요합니다. 설정에서 허용해주세요.';
-    }
-    if (error.message.includes('timeout')) {
-      return '위치 측위 시간이 초과되었습니다.';
-    }
-    return error.message;
+function isSecureWebContext(): boolean {
+  if (Platform.OS !== 'web') {
+    return true;
   }
 
-  return '위치 신호를 찾을 수 없습니다. 잠시 후 다시 시도해주세요.';
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  if (window.isSecureContext) {
+    return true;
+  }
+
+  const host = window.location.hostname;
+  return host === 'localhost' || host === '127.0.0.1';
 }
 
-function sortByBestAccuracy(readings: LocationReading[]) {
-  return [...readings].sort((a, b) => a.accuracy - b.accuracy);
-}
-
-function averageBestReadings(readings: LocationReading[]) {
-  const sorted = sortByBestAccuracy(readings);
-  const best = sorted.slice(0, Math.min(READINGS_REQUIRED, sorted.length));
-
-  const latitude = best.reduce((sum, r) => sum + r.latitude, 0) / best.length;
-  const longitude = best.reduce((sum, r) => sum + r.longitude, 0) / best.length;
-  const accuracy = best.reduce((sum, r) => sum + r.accuracy, 0) / best.length;
-
-  return {
-    latitude,
-    longitude,
-    accuracy,
-    readings: best,
-  };
-}
-
-export function useCurrentLocation() {
+export function useCurrentLocation(): {
+  location: LocationResult | null;
+  isLoading: boolean;
+  error: string | null;
+  accuracy: number | null;
+  getCurrentLocation: () => Promise<void>;
+} {
   const [state, setState] = useState<UseCurrentLocationState>({
     location: null,
-    loading: false,
+    isLoading: false,
     error: null,
-    permissionGranted: false,
+    accuracy: null,
   });
 
-  // watch subscription은 반드시 useRef로 관리해 클로저/중복 구독 문제를 방지한다.
-  const subscriptionRef = useRef<Location.LocationSubscription | null>(null);
+  // Android expo-location watch subscription
+  const androidSubscriptionRef = useRef<Location.LocationSubscription | null>(null);
+  // Web navigator.geolocation watchId
+  const webWatchIdRef = useRef<number | null>(null);
+  // 공통 타임아웃
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // 수집 샘플 버퍼
   const readingsRef = useRef<LocationReading[]>([]);
-  const inFlightRef = useRef(false);
+  // 중복 실행 방지
+  const inFlightRef = useRef<boolean>(false);
+  // 콜백 레이스 방지용 요청 id
+  const requestIdRef = useRef<number>(0);
 
-  // 공통 정리 함수: 구독/타이머를 반드시 제거해 메모리 누수를 막는다.
-  const clearTrackingResources = useCallback(() => {
+  const clearTrackingResources = useCallback((): void => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
       timeoutRef.current = null;
     }
 
-    if (subscriptionRef.current) {
-      subscriptionRef.current.remove();
-      subscriptionRef.current = null;
+    if (androidSubscriptionRef.current) {
+      androidSubscriptionRef.current.remove();
+      androidSubscriptionRef.current = null;
+    }
+
+    if (Platform.OS === 'web' && webWatchIdRef.current !== null && typeof navigator !== 'undefined') {
+      navigator.geolocation.clearWatch(webWatchIdRef.current);
+      webWatchIdRef.current = null;
     }
   }, []);
 
-  // 권한 상태 조회
-  const refreshPermission = useCallback(async () => {
-    const permission = await Location.getForegroundPermissionsAsync();
-    const granted = permission.granted;
-    setState((prev) => ({ ...prev, permissionGranted: granted }));
-    return granted;
-  }, []);
-
-  // 권한 요청 + 거부 시 설정 화면 유도
-  const ensurePermission = useCallback(async () => {
-    const current = await Location.getForegroundPermissionsAsync();
-    if (current.granted) {
-      setState((prev) => ({ ...prev, permissionGranted: true }));
-      return true;
-    }
-
-    const requested = await Location.requestForegroundPermissionsAsync();
-    const granted = requested.granted;
-    setState((prev) => ({ ...prev, permissionGranted: granted }));
-
-    if (!granted) {
-      if (Platform.OS === 'web') {
-        Alert.alert(
-          '위치 권한 필요',
-          '브라우저 주소창의 위치 권한을 허용한 뒤 다시 시도해주세요. (HTTPS 환경 필요)',
-        );
-      } else {
-        Alert.alert(
-          '위치 권한 필요',
-          '위치 권한이 필요합니다. 설정에서 허용해주세요.',
-          [
-            {
-              text: '설정으로 이동',
-              onPress: () => {
-                void Linking.openSettings();
-              },
-            },
-            {
-              text: '취소',
-              style: 'cancel',
-            },
-          ],
-        );
+  const finalizeWithReadings = useCallback(
+    async (requestId: number, allowPartial: boolean): Promise<void> => {
+      if (requestId !== requestIdRef.current) {
+        return;
       }
-    }
 
-    return granted;
-  }, []);
+      clearTrackingResources();
 
-  // 측위 완료 시 주소 변환 + 최종 state 저장
-  const commitLocationResult = useCallback(
-    async (
-      averaged: {
-        latitude: number;
-        longitude: number;
-        accuracy: number;
-        readings: LocationReading[];
-      },
-      addressOverride?: KakaoAddressResult,
-    ) => {
+      const filtered = filterReadingsByAccuracy(readingsRef.current, ACCURACY_THRESHOLD);
+      const selected = pickTopNByAccuracy(filtered, READINGS_REQUIRED);
+
+      if (!selected.length || (!allowPartial && selected.length < READINGS_REQUIRED)) {
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: '위치 측위 시간이 초과되었습니다.',
+        }));
+        inFlightRef.current = false;
+        return;
+      }
+
       try {
-        const addressResult =
-          addressOverride ??
-          (await resolveKakaoAddressFromCoord(averaged.latitude, averaged.longitude));
+        const averaged = calculateAverageLocation(selected);
+        const address = await resolveKakaoAddressFromCoord(averaged.latitude, averaged.longitude);
 
-        const finalResult: LocationResult = {
+        if (requestId !== requestIdRef.current) {
+          return;
+        }
+
+        const result: LocationResult = {
           latitude: averaged.latitude,
           longitude: averaged.longitude,
           accuracy: averaged.accuracy,
-          readings: averaged.readings,
-          roadAddress: addressResult.roadAddress,
-          jibunAddress: addressResult.jibunAddress,
-          displayAddress: addressResult.displayAddress,
+          address: address.address,
+          roadAddress: address.roadAddress,
+          jibunAddress: address.jibunAddress,
         };
 
-        console.info('[Location]', '측위 완료 정확도(m)', {
-          accuracy: Number(finalResult.accuracy.toFixed(2)),
-          lat: finalResult.latitude,
-          lng: finalResult.longitude,
-          address: finalResult.displayAddress,
-        });
+        console.info('[useCurrentLocation] 측위 완료 정확도(m):', Number(result.accuracy.toFixed(1)));
 
-        setState((prev) => ({
-          ...prev,
-          location: finalResult,
-          loading: false,
+        setState({
+          location: result,
+          isLoading: false,
           error: null,
-        }));
+          accuracy: result.accuracy,
+        });
       } catch (error) {
+        const message = error instanceof Error ? error.message : '위치 신호를 찾을 수 없습니다.';
         setState((prev) => ({
           ...prev,
-          loading: false,
-          error: toFriendlyErrorMessage(error),
+          isLoading: false,
+          error: message,
         }));
       } finally {
         inFlightRef.current = false;
       }
     },
-    [],
+    [clearTrackingResources],
   );
 
-  // 타임아웃 처리: 수집값이 있으면 가장 좋은 값으로 fallback
-  const handleTimeout = useCallback(async () => {
-    clearTrackingResources();
+  const startAndroidWatch = useCallback(
+    async (requestId: number): Promise<void> => {
+      const permission = await Location.requestForegroundPermissionsAsync();
 
-    const collected = readingsRef.current;
-    if (collected.length === 0) {
-      setState((prev) => ({
-        ...prev,
-        loading: false,
-        error: '위치 측위 시간이 초과되었습니다.',
-      }));
-      inFlightRef.current = false;
-      return;
-    }
+      if (!permission.granted) {
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: '위치 권한이 필요합니다. 설정에서 허용해주세요.',
+        }));
 
-    const averaged = averageBestReadings(collected);
-    await commitLocationResult(averaged);
-  }, [clearTrackingResources, commitLocationResult]);
+        inFlightRef.current = false;
 
-  // 내 위치 재실행 핵심 로직
-  const requestCurrentLocation = useCallback(async () => {
-    if (inFlightRef.current) {
-      return;
-    }
+        try {
+          await Linking.openSettings();
+        } catch {
+          // 설정 열기 실패 시 에러 메시지로 안내한다.
+        }
 
-    const granted = await ensurePermission();
-    if (!granted) {
-      setState((prev) => ({
-        ...prev,
-        loading: false,
-        error: '위치 권한이 필요합니다. 설정에서 허용해주세요.',
-      }));
-      return;
-    }
+        return;
+      }
 
-    inFlightRef.current = true;
-    clearTrackingResources();
-    readingsRef.current = [];
-
-    setState((prev) => ({
-      ...prev,
-      loading: true,
-      error: null,
-    }));
-
-    try {
-      // 최고 정밀도 기반 watch 측위 시작
       const subscription = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.BestForNavigation,
           timeInterval: 1000,
           distanceInterval: 0,
         },
-        (position) => {
-          const accuracy = position.coords.accuracy ?? Number.POSITIVE_INFINITY;
-          const threshold = getAccuracyThresholdByPlatform();
+        (position: Location.LocationObject) => {
+          if (requestId !== requestIdRef.current) {
+            return;
+          }
 
-          // 정확도 기준 이하 샘플만 수집
-          if (accuracy > threshold) {
+          const accuracy = position.coords.accuracy ?? Number.POSITIVE_INFINITY;
+          if (accuracy > ACCURACY_THRESHOLD) {
             return;
           }
 
@@ -269,46 +199,143 @@ export function useCurrentLocation() {
           });
 
           if (readingsRef.current.length >= READINGS_REQUIRED) {
-            const averaged = averageBestReadings(readingsRef.current);
-            clearTrackingResources();
-            void commitLocationResult(averaged);
+            void finalizeWithReadings(requestId, false);
           }
         },
       );
 
-      subscriptionRef.current = subscription;
+      androidSubscriptionRef.current = subscription;
 
-      // 실내 환경 대응 15초 타임아웃
       timeoutRef.current = setTimeout(() => {
-        void handleTimeout();
+        void finalizeWithReadings(requestId, true);
       }, TIMEOUT_MS);
+    },
+    [finalizeWithReadings],
+  );
+
+  const startWebWatch = useCallback(
+    async (requestId: number): Promise<void> => {
+      if (!isSecureWebContext()) {
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: '위치 서비스는 HTTPS 환경에서만 사용 가능합니다.',
+        }));
+        inFlightRef.current = false;
+        return;
+      }
+
+      if (typeof navigator === 'undefined' || !navigator.geolocation) {
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: '위치 신호를 찾을 수 없습니다.',
+        }));
+        inFlightRef.current = false;
+        return;
+      }
+
+      const watchId = navigator.geolocation.watchPosition(
+        (position: GeolocationPosition) => {
+          if (requestId !== requestIdRef.current) {
+            return;
+          }
+
+          const accuracy = position.coords.accuracy ?? Number.POSITIVE_INFINITY;
+          if (accuracy > ACCURACY_THRESHOLD) {
+            return;
+          }
+
+          readingsRef.current.push({
+            latitude: position.coords.latitude,
+            longitude: position.coords.longitude,
+            accuracy,
+            timestamp: Date.now(),
+          });
+
+          if (readingsRef.current.length >= READINGS_REQUIRED) {
+            void finalizeWithReadings(requestId, false);
+          }
+        },
+        (error: GeolocationPositionError) => {
+          if (requestId !== requestIdRef.current) {
+            return;
+          }
+
+          clearTrackingResources();
+          setState((prev) => ({
+            ...prev,
+            isLoading: false,
+            error: mapGeolocationErrorCode(error.code),
+          }));
+          inFlightRef.current = false;
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: TIMEOUT_MS,
+          maximumAge: 0,
+        },
+      );
+
+      webWatchIdRef.current = watchId;
+
+      timeoutRef.current = setTimeout(() => {
+        void finalizeWithReadings(requestId, true);
+      }, TIMEOUT_MS);
+    },
+    [clearTrackingResources, finalizeWithReadings],
+  );
+
+  const getCurrentLocation = useCallback(async (): Promise<void> => {
+    if (inFlightRef.current) {
+      return;
+    }
+
+    inFlightRef.current = true;
+    requestIdRef.current += 1;
+    const requestId = requestIdRef.current;
+
+    clearTrackingResources();
+    readingsRef.current = [];
+
+    setState((prev) => ({
+      ...prev,
+      isLoading: true,
+      error: null,
+    }));
+
+    try {
+      if (Platform.OS === 'web') {
+        await startWebWatch(requestId);
+      } else if (Platform.OS === 'android') {
+        await startAndroidWatch(requestId);
+      } else {
+        setState((prev) => ({
+          ...prev,
+          isLoading: false,
+          error: '현재 플랫폼은 위치 측위를 지원하지 않습니다.',
+        }));
+        inFlightRef.current = false;
+      }
     } catch (error) {
       clearTrackingResources();
-      inFlightRef.current = false;
+
+      const message = error instanceof Error ? error.message : '위치 신호를 찾을 수 없습니다.';
       setState((prev) => ({
         ...prev,
-        loading: false,
-        error: toFriendlyErrorMessage(error),
+        isLoading: false,
+        error: message,
       }));
+      inFlightRef.current = false;
     }
-  }, [clearTrackingResources, commitLocationResult, ensurePermission, handleTimeout]);
+  }, [clearTrackingResources, startAndroidWatch, startWebWatch]);
 
-  // 앱 복귀 시 권한 상태 재체크
+  // 첫 진입 시 자동 측위 1회 실행
   useEffect(() => {
-    void refreshPermission();
+    void getCurrentLocation();
+  }, [getCurrentLocation]);
 
-    const sub = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active') {
-        void refreshPermission();
-      }
-    });
-
-    return () => {
-      sub.remove();
-    };
-  }, [refreshPermission]);
-
-  // 언마운트 시 리소스 정리
+  // 언마운트 시 구독/워치 정리
   useEffect(() => {
     return () => {
       clearTrackingResources();
@@ -318,13 +345,9 @@ export function useCurrentLocation() {
 
   return {
     location: state.location,
-    loading: state.loading,
+    isLoading: state.isLoading,
     error: state.error,
-    permissionGranted: state.permissionGranted,
-    requestCurrentLocation,
-    retry: requestCurrentLocation,
-    refreshPermission,
-    locationAccuracyHint:
-      '정확도 향상을 위해 기기 설정 > 위치 > Google 위치 정확도(와이파이/블루투스 스캔) 활성화를 권장합니다.',
+    accuracy: state.accuracy,
+    getCurrentLocation,
   };
 }

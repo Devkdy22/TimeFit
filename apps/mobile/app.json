@@ -19,20 +19,31 @@
     "experiments": {
       "typedRoutes": true
     },
+    "web": {
+      "bundler": "webpack"
+    },
     "android": {
       "package": "com.devkdy.timefitmobile",
       "permissions": [
-        "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
         "ACCESS_NETWORK_STATE",
         "ACCESS_WIFI_STATE",
-        "CHANGE_WIFI_STATE"
+        "CHANGE_WIFI_STATE",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION"
       ]
     },
     "ios": {
       "bundleIdentifier": "com.devkdy.timefitmobile",
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "현재 위치를 출발지로 자동 설정하기 위해 위치 권한이 필요합니다."
+      }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "33b571f0-38f6-427d-95c8-3fe78588ea23"
       }
     }
   }

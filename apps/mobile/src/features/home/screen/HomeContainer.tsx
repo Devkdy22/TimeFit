@@ -85,7 +85,7 @@ export function HomeContainer() {
         return;
       }
 
-      const resolved = await resolveOnce();
+      const resolved = await resolveOnce({ forceFresh: true });
       const finalAddress =
         resolved.locationInfo.jibunAddress?.trim() ||
         resolved.locationInfo.roadAddress?.trim() ||
@@ -101,6 +101,7 @@ export function HomeContainer() {
         address: finalAddress,
         latitude: resolved.pinPosition.lat,
         longitude: resolved.pinPosition.lng,
+        accuracy: resolved.accuracy ?? undefined,
         iconType: 'location',
       });
 

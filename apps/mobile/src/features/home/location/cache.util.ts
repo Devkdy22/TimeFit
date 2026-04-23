@@ -5,10 +5,19 @@ export type CachedResolvedLocation = {
     lat: number;
     lng: number;
   };
+  resolvedAt: number;
   displayName: string;
   accuracy: number | null;
   finalName: string;
-  resolvedBy: 'cluster' | 'poi' | 'geocoder' | 'fallback';
+  resolvedBy:
+    | 'rest_road'
+    | 'rest_jibun'
+    | 'js_road'
+    | 'js_jibun'
+    | 'representative_jibun'
+    | 'native_reverse'
+    | 'fallback'
+    | 'none';
   locationInfo: LocationInfo;
 };
 
