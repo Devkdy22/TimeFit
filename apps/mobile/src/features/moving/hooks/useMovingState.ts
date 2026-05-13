@@ -170,24 +170,6 @@ function buildFallbackFromSegmentPoints(segment: TrackingSegment): MapCoordinate
   ]);
 }
 
-function lightlyInterpolatePolyline(points: MapCoordinate[]) {
-  if (points.length < 2 || points.length > 3) {
-    return points;
-  }
-  const expanded: MapCoordinate[] = [];
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const start = points[index];
-    const end = points[index + 1];
-    expanded.push(start);
-    expanded.push({
-      lat: start.lat + (end.lat - start.lat) * 0.5,
-      lng: start.lng + (end.lng - start.lng) * 0.5,
-    });
-  }
-  expanded.push(points[points.length - 1]);
-  return expanded;
-}
-
 function toMeters(a: MapCoordinate, b: MapCoordinate) {
   const rad = Math.PI / 180;
   const dLat = (b.lat - a.lat) * rad;
@@ -198,20 +180,6 @@ function toMeters(a: MapCoordinate, b: MapCoordinate) {
   const sinLng = Math.sin(dLng / 2);
   const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
   return 2 * 6371000 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
-}
-
-function findNearestIndex(points: MapCoordinate[], target: MapCoordinate) {
-  if (points.length === 0) return 0;
-  let minDist = Number.POSITIVE_INFINITY;
-  let minIndex = 0;
-  for (let index = 0; index < points.length; index += 1) {
-    const distance = toMeters(points[index], target);
-    if (distance < minDist) {
-      minDist = distance;
-      minIndex = index;
-    }
-  }
-  return minIndex;
 }
 
 function findClosestIndex(polyline: MapCoordinate[], target: MapCoordinate) {
@@ -314,27 +282,6 @@ async function fetchBusRouteGeometry(busRouteId: string): Promise<BusRouteGeomet
 
   routeInFlight.set(busRouteId, task);
   return task;
-}
-
-function cutGeometryBetweenStops(
-  geometry: MapCoordinate[],
-  startStop?: MapCoordinate,
-  endStop?: MapCoordinate,
-): MapCoordinate[] {
-  if (geometry.length < 2 || !startStop || !endStop) {
-    return geometry;
-  }
-
-  const startIndex = findNearestIndex(geometry, startStop);
-  const endIndex = findNearestIndex(geometry, endStop);
-
-  if (startIndex === endIndex) {
-    return [geometry[startIndex]];
-  }
-  if (startIndex < endIndex) {
-    return geometry.slice(startIndex, endIndex + 1);
-  }
-  return geometry.slice(endIndex, startIndex + 1).reverse();
 }
 
 function segmentStartPoint(segment?: TrackingSegment) {

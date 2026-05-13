@@ -307,15 +307,6 @@ function resolveSubwayBoundText(segment: RouteSegment, fallbackDirection?: strin
   return '방면 정보';
 }
 
-function toEtaMinuteText(segment: RouteSegment, nowMs: number) {
-  const sec = liveSeconds(segment, nowMs);
-  if (sec === null) {
-    return '확인중';
-  }
-  const minutes = Math.max(0, Math.ceil(sec / 60));
-  return `${minutes}분`;
-}
-
 function toVirtualSegmentCandidate(
   base: RouteSegment,
   candidate: NonNullable<RouteSegment['candidates']>[number],

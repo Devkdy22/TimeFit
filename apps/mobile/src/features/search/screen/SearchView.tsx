@@ -114,7 +114,6 @@ export function SearchView(props: SearchViewProps) {
     fieldSuggestions,
     isSearchingFieldSuggestions,
     isSettingCurrentOrigin,
-    mapQuery,
     mapSearchResults,
     isSearchingMap,
     mapCenter,

@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
+import BestIcon from '../../../../assets/icons/best.png';
 import { HomeTabBar } from '../../../components/home';
 import { TimiSvg } from '../../../components/timi';
 import type { UiStatus } from '../../../theme/status-config';
@@ -36,7 +37,7 @@ export interface RouteRecommendViewProps {
   onClose: () => void;
 }
 
-const BEST_ICON = require('../../../../assets/icons/best.png');
+const BEST_ICON = BestIcon;
 
 function RouteStatusPill({ label }: { label: string }) {
   const isWarning = label === '주의';
@@ -155,38 +156,6 @@ function resolveSegmentVisual(segment: RouteCardItem['segments'][number]) {
   };
 }
 
-function toRealtimeBadgeText(segment: RouteCardItem['segments'][number]) {
-  if (segment.mode === 'walk') {
-    return null;
-  }
-
-  const candidateEtaMinutes = segment.candidates
-    ?.map((candidate) => candidate.etaMinutes)
-    .filter((value): value is number => Number.isFinite(value))
-    .sort((a, b) => a - b)[0];
-  const effectiveEtaMinutes =
-    typeof segment.realtimeEtaMinutes === 'number' ? segment.realtimeEtaMinutes : candidateEtaMinutes;
-
-  if (typeof effectiveEtaMinutes === 'number') {
-    const totalSeconds = Math.max(0, Math.round(effectiveEtaMinutes * 60));
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    const etaText = seconds > 0 ? `${minutes}분 ${seconds}초` : `${minutes}분`;
-    if (segment.realtimeStatus === 'STALE') {
-      return `최근 ${etaText}`;
-    }
-    if (segment.realtimeStatus === 'DELAYED') {
-      return `${etaText}(지연)`;
-    }
-    return etaText;
-  }
-
-  if (segment.realtimeStatus === 'UNAVAILABLE') {
-    return '정보 없음';
-  }
-  return '확인중';
-}
-
 function toLiveRemainingSeconds(segment: RouteCardItem['segments'][number], nowMs: number) {
   const candidateSeconds = segment.candidates
     ?.map((candidate) => {
@@ -216,28 +185,6 @@ function toLiveRemainingSeconds(segment: RouteCardItem['segments'][number], nowM
   }
   const elapsedSeconds = Math.max(0, Math.floor((nowMs - updatedAtMs) / 1000));
   return Math.max(0, Math.round(baseSeconds) - elapsedSeconds);
-}
-
-function toMinuteSecondText(segment: RouteCardItem['segments'][number]) {
-  if (typeof segment.realtimeEtaSeconds === 'number' && Number.isFinite(segment.realtimeEtaSeconds)) {
-    const totalSec = Math.max(0, Math.round(segment.realtimeEtaSeconds));
-    if (totalSec <= 0) {
-      return '곧 도착';
-    }
-    const minutes = Math.floor(totalSec / 60);
-    const seconds = totalSec % 60;
-    return `${minutes}분 ${seconds}초`;
-  }
-  if (typeof segment.realtimeEtaMinutes === 'number') {
-    const totalSec = Math.max(0, Math.round(segment.realtimeEtaMinutes * 60));
-    if (totalSec <= 0) {
-      return '곧 도착';
-    }
-    const minutes = Math.floor(totalSec / 60);
-    const seconds = totalSec % 60;
-    return `${minutes}분 ${seconds}초`;
-  }
-  return null;
 }
 
 function toRealtimeLegendText(segment: RouteCardItem['segments'][number], nowMs: number) {
@@ -281,58 +228,6 @@ function formatEtaText(segment: RouteCardItem['segments'][number], nowMs: number
     return '정보 없음';
   }
   return '확인중';
-}
-
-function buildGroupedTransitSegments(segments: RouteCardItem['segments']) {
-  const transitSegments = segments.filter((segment) => segment.mode === 'bus' || segment.mode === 'subway');
-  const groups: Array<{
-    key: string;
-    mode: 'bus' | 'subway';
-    startName?: string;
-    endName?: string;
-    durationMinutes: number;
-    lines: string[];
-    items: RouteCardItem['segments'];
-  }> = [];
-
-  transitSegments.forEach((segment) => {
-    if (segment.mode === 'bus') {
-      const key = `bus::${segment.startName?.trim() ?? ''}::${segment.endName?.trim() ?? ''}`;
-      const existing = groups.find((group) => group.key === key && group.mode === 'bus');
-      if (existing) {
-        existing.durationMinutes = Math.max(existing.durationMinutes, segment.durationMinutes);
-        existing.items.push(segment);
-        const line = segment.lineLabel?.trim();
-        if (line && !existing.lines.includes(line)) {
-          existing.lines.push(line);
-        }
-        return;
-      }
-
-      groups.push({
-        key,
-        mode: 'bus',
-        startName: segment.startName,
-        endName: segment.endName,
-        durationMinutes: segment.durationMinutes,
-        lines: segment.lineLabel?.trim() ? [segment.lineLabel.trim()] : [],
-        items: [segment],
-      });
-      return;
-    }
-
-    groups.push({
-      key: `subway::${segment.lineLabel ?? 'none'}::${groups.length}`,
-      mode: 'subway',
-      startName: segment.startName,
-      endName: segment.endName,
-      durationMinutes: segment.durationMinutes,
-      lines: segment.lineLabel?.trim() ? [segment.lineLabel.trim()] : [],
-      items: [segment],
-    });
-  });
-
-  return groups;
 }
 
 function buildGroupedBusByStopPair(segments: RouteCardItem['segments']) {
@@ -402,62 +297,6 @@ function buildGroupedBusByStopPair(segments: RouteCardItem['segments']) {
       items: sorted,
     };
   });
-}
-
-function resolveFirstBoardingSegment(
-  segments: RouteCardItem['segments'],
-): RouteCardItem['segments'][number] | null {
-  const transitSegments = segments.filter((segment) => segment.mode === 'bus' || segment.mode === 'subway');
-  if (transitSegments.length === 0) {
-    return null;
-  }
-
-  const first = transitSegments[0];
-  const firstIsUnavailable =
-    first.realtimeStatus === 'UNAVAILABLE' ||
-    first.realtimeStatus === 'CHECKING' ||
-    first.realtimeStatus === undefined;
-  if (!firstIsUnavailable) {
-    return first;
-  }
-
-  const fallback = transitSegments.find(
-    (segment) =>
-      typeof segment.realtimeEtaMinutes === 'number' ||
-      segment.realtimeStatus === 'LIVE' ||
-      segment.realtimeStatus === 'DELAYED' ||
-      segment.realtimeStatus === 'STALE',
-  );
-  return fallback ?? first;
-}
-
-function toFirstBoardingRealtimeText(
-  segment: RouteCardItem['segments'][number] | null,
-  nowMs: number,
-): string {
-  if (!segment) {
-    return '첫 탑승 교통 정보 없음';
-  }
-  const liveSeconds = toLiveRemainingSeconds(segment, nowMs);
-  if (typeof liveSeconds === 'number') {
-    const minutes = Math.floor(liveSeconds / 60);
-    const seconds = liveSeconds % 60;
-    const minuteSecondText = `${minutes}분 ${seconds}초`;
-    if (segment.realtimeStatus === 'DELAYED') {
-      return `${minuteSecondText} 후 도착 (지연)`;
-    }
-    if (segment.realtimeStatus === 'STALE') {
-      return `최근 정보 기준 ${minuteSecondText} 후 도착`;
-    }
-    return `${minuteSecondText} 후 도착`;
-  }
-  if (segment.realtimeStatus === 'UNAVAILABLE') {
-    return '예정 정보';
-  }
-  if (segment.realtimeStatus === 'CHECKING') {
-    return '실시간 확인중';
-  }
-  return '실시간 확인중';
 }
 
 function estimateTextWidth(text: string, fontSize: number): number {

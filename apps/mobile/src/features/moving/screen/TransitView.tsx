@@ -169,12 +169,9 @@ function buildPathUntilProgress(points: MapCoordinate[], progress: number): MapC
 }
 
 export function TransitView({
-  currentTime,
-  arrivalTime,
   remainingTime,
   mainAction,
   stageText,
-  supportText,
   upcomingActionTitle,
   upcomingActionSubtitle,
   upcomingActionTimeText,

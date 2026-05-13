@@ -7,7 +7,6 @@ import {
   withSequence,
   withSpring,
   withTiming,
-  type SharedValue,
 } from 'react-native-reanimated';
 import { CHARACTER_SPRING_CONFIG, clamp } from '../utils/physics';
 import type { CharacterGestureValues } from './useCharacterGesture';
