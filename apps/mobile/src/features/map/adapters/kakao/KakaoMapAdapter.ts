@@ -1,6 +1,13 @@
 import { createElement } from 'react';
-import { NativeModules, UIManager, View, findNodeHandle, type StyleProp, type ViewStyle } from 'react-native';
-import KakaoMaps from 'react-native-kakao-maps';
+import {
+  NativeModules,
+  UIManager,
+  View,
+  findNodeHandle,
+  requireNativeComponent,
+  type StyleProp,
+  type ViewStyle,
+} from 'react-native';
 import { CurrentMarker } from '../../CurrentMarker';
 import { NextActionMarker } from '../../NextActionMarker';
 import { RouteLine } from '../../RouteLine';
@@ -17,7 +24,13 @@ type KakaoViewCommandName = 'setCenter' | 'addMarker' | 'drawPolyline' | 'update
 
 const KAKAO_VIEW_MANAGER_NAME = 'KakaoMapView';
 const KAKAO_MAPS_MODULE = NativeModules.KakaoMaps as KakaoNativeModule | undefined;
-const NativeKakaoMapView = (KakaoMaps as { KakaoMapView?: NativeKakaoMapComponent }).KakaoMapView;
+const NativeKakaoMapView = (() => {
+  try {
+    return requireNativeComponent<NativeKakaoMapViewProps>(KAKAO_VIEW_MANAGER_NAME) as NativeKakaoMapComponent;
+  } catch {
+    return undefined;
+  }
+})();
 
 function dispatchViewCommand(
   viewRef: unknown,

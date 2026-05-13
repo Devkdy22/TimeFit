@@ -31,17 +31,20 @@ export function useHomeState() {
   const apiStatus = minutesUntilArrival <= 30 ? '긴급' : minutesUntilArrival <= 50 ? '주의' : '여유';
   const status = resolveStatusFromApi(apiStatus);
   const originLabel = origin?.name ?? '출발지를 선택하세요';
-  const destinationLabel = destination?.name ?? '';
-  const hasDestination = destinationLabel.length > 0;
+  const hasOrigin = origin != null;
+  const destinationLabel = destination?.name ?? '도착지 설정이 필요해요';
+  const hasDestination = destination != null;
+  const hasArrivalAt = Boolean(arrivalAt);
   const minutesUntilDeparture = Math.max(0, minutesUntilArrival - 45);
 
   const copy = status.buildCopy({
     minutesUntilDeparture,
     destinationName: hasDestination ? destinationLabel : undefined,
   });
-
   return {
+    hasOrigin,
     arrivalAt,
+    hasArrivalAt,
     status,
     copy,
     originLabel,

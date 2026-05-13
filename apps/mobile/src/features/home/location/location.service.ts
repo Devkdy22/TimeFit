@@ -9,7 +9,6 @@ import {
 import { resolveKakaoAddressFromCoord } from '../../../services/kakaoGeoService';
 import {
   getCachedLocation,
-  getLatestGeocodeInfo,
   setCachedLocation,
   toLocationCacheKey,
   type CachedResolvedLocation,
@@ -23,19 +22,19 @@ type GpsSample = {
 };
 
 const ACCURACY_THRESHOLD = 80;
-const READINGS_REQUIRED = 2;
-const GPS_SAMPLE_TARGET = 4;
-const GPS_TIMEOUT_MS = 4500;
+const READINGS_REQUIRED = 3;
+const GPS_SAMPLE_TARGET = 6;
+const GPS_TIMEOUT_MS = 7000;
 const CACHE_TTL_MS = 20000;
 const GEO_TIMEOUT_MS = 2500;
 const POI_TIMEOUT_MS = 600;
 
 const EARLY_EXIT_CONDITIONS = {
-  minSamples: 1,
-  excellentAccuracy: 12,
-  goodAccuracy: 18,
-  maxWaitMs: 4500,
-  minWaitMs: 700,
+  minSamples: 2,
+  excellentAccuracy: 8,
+  goodAccuracy: 14,
+  maxWaitMs: 7000,
+  minWaitMs: 1400,
 } as const;
 
 export type ResolvedCurrentLocation = CachedResolvedLocation & {
@@ -113,6 +112,10 @@ function toMetersDistance(lat1: number, lng1: number, lat2: number, lng2: number
   return earthRadius * c;
 }
 
+function isLikelyRoadAddress(address: string) {
+  return /(?:대로|로|길)\s*\d+/u.test(address);
+}
+
 function filterAccurateSamples(samples: GpsSample[]) {
   return samples.filter((sample) => {
     if (!Number.isFinite(sample.lat) || !Number.isFinite(sample.lng)) {
@@ -133,7 +136,7 @@ function sortByAccuracy(samples: GpsSample[]) {
   });
 }
 
-function filterOutliersByDistance(samples: GpsSample[], maxDistanceMeters = 40) {
+function filterOutliersByDistance(samples: GpsSample[], maxDistanceMeters = 25) {
   if (samples.length <= 2) {
     return samples;
   }
@@ -519,18 +522,22 @@ function resolveDisplayAddress(params: {
   restJibun: string | null;
   jsRoad: string | null;
   jsJibun: string | null;
+  nativeRoad: string | null;
   representativeJibun: string | null;
 }): { finalName: string; resolvedBy: ResolvedCurrentLocation['resolvedBy'] } {
-  const { restRoad, restJibun, jsRoad, jsJibun, representativeJibun } = params;
+  const { restRoad, restJibun, jsRoad, jsJibun, nativeRoad, representativeJibun } = params;
 
   if (restRoad) {
     return { finalName: restRoad, resolvedBy: 'rest_road' };
   }
-  if (restJibun) {
-    return { finalName: restJibun, resolvedBy: 'rest_jibun' };
-  }
   if (jsRoad) {
     return { finalName: jsRoad, resolvedBy: 'js_road' };
+  }
+  if (nativeRoad) {
+    return { finalName: nativeRoad, resolvedBy: 'native_reverse' };
+  }
+  if (restJibun) {
+    return { finalName: restJibun, resolvedBy: 'rest_jibun' };
   }
   if (jsJibun) {
     return { finalName: jsJibun, resolvedBy: 'js_jibun' };
@@ -658,24 +665,14 @@ export async function resolveCurrentLocationOnce(options?: { forceFresh?: boolea
   const poiInfo = poiResult.status === 'fulfilled' ? poiResult.value : null;
   const locationInfo = mergeLocationInfo(lat, lng, poiInfo, restParsed);
 
-  const latestGeocodeInfo = getLatestGeocodeInfo();
-  const jsGeocoderDistanceMeters = latestGeocodeInfo
-    ? toMetersDistance(lat, lng, latestGeocodeInfo.lat, latestGeocodeInfo.lng)
-    : Number.POSITIVE_INFINITY;
-  const hasNearbyJsGeocode = Number.isFinite(jsGeocoderDistanceMeters) && jsGeocoderDistanceMeters <= 120;
-  const jsGeocodeRoad = hasNearbyJsGeocode ? latestGeocodeInfo?.roadAddress?.trim() || null : null;
-  const jsGeocodeJibun = hasNearbyJsGeocode ? latestGeocodeInfo?.jibunAddress?.trim() || null : null;
-  const jsRepresentativeJibun = hasNearbyJsGeocode
-    ? latestGeocodeInfo?.representativeJibun?.trim() || null
-    : null;
+  const shouldTryNativeRoadFallback = !restParsed.roadAddress;
+  const nativeReverse = shouldTryNativeRoadFallback ? await resolveNativeReverseGeocode(lat, lng) : null;
+  const nativeReverseAddress = nativeReverse?.address?.trim() || null;
+  const nativeReverseRoad = nativeReverseAddress && isLikelyRoadAddress(nativeReverseAddress) ? nativeReverseAddress : null;
   const hasValidRestResult = Boolean(restParsed.roadAddress || restParsed.jibunAddress);
   const restCoord2AddressIgnored = !hasValidRestResult;
 
   console.info('[Location]', 'geocoder raw result', {
-    latestGeocodeInfo,
-    jsGeocoderDistanceMeters,
-    hasNearbyJsGeocode,
-    jsRepresentativeJibun,
     restCoord2AddressRoad: restParsed.roadAddress,
     restCoord2AddressJibun: restParsed.jibunAddress,
     restCoord2AddressIgnored,
@@ -691,17 +688,14 @@ export async function resolveCurrentLocationOnce(options?: { forceFresh?: boolea
   const geocoderAddress =
     restParsed.roadAddress ||
     restParsed.jibunAddress ||
-    jsGeocodeRoad ||
-    jsGeocodeJibun ||
     locationInfo.roadAddress ||
     locationInfo.jibunAddress ||
+    nativeReverseAddress ||
     null;
   console.info('[Location]', 'geocoder result', {
     geocoderAddress,
-    roadAddress: restParsed.roadAddress || jsGeocodeRoad || locationInfo.roadAddress || null,
-    jibunAddress: restParsed.jibunAddress || jsGeocodeJibun || locationInfo.jibunAddress || null,
-    representativeJibun: jsRepresentativeJibun,
-    distanceFromGpsToGeocoder: jsGeocoderDistanceMeters,
+    roadAddress: restParsed.roadAddress || nativeReverseRoad || locationInfo.roadAddress || null,
+    jibunAddress: restParsed.jibunAddress || locationInfo.jibunAddress || null,
   });
   const cluster = resolveApartmentClusterFromCandidates(locationInfo.candidates ?? []);
   console.info('[Location]', 'poi result', {
@@ -712,16 +706,15 @@ export async function resolveCurrentLocationOnce(options?: { forceFresh?: boolea
   const finalResolved = resolveDisplayAddress({
     restRoad: restParsed.roadAddress,
     restJibun: restParsed.jibunAddress,
-    jsRoad: jsGeocodeRoad,
-    jsJibun: jsGeocodeJibun,
-    representativeJibun: jsRepresentativeJibun,
+    jsRoad: null,
+    jsJibun: null,
+    nativeRoad: nativeReverseRoad,
+    representativeJibun: null,
   });
   let finalName = finalResolved.finalName;
   let resolvedBy: ResolvedCurrentLocation['resolvedBy'] = finalResolved.resolvedBy;
 
   if (finalName === '위치 확인 중') {
-    const nativeReverse = await resolveNativeReverseGeocode(lat, lng);
-    const nativeReverseAddress = nativeReverse?.address ?? null;
     if (nativeReverseAddress) {
       finalName = nativeReverseAddress;
       resolvedBy = 'native_reverse';
@@ -740,8 +733,8 @@ export async function resolveCurrentLocationOnce(options?: { forceFresh?: boolea
     resolvedBy,
     locationInfo: {
       ...locationInfo,
-      roadAddress: restParsed.roadAddress || jsGeocodeRoad || locationInfo.roadAddress || undefined,
-      jibunAddress: restParsed.jibunAddress || jsGeocodeJibun || jsRepresentativeJibun || locationInfo.jibunAddress || undefined,
+      roadAddress: restParsed.roadAddress || nativeReverseRoad || locationInfo.roadAddress || undefined,
+      jibunAddress: restParsed.jibunAddress || locationInfo.jibunAddress || undefined,
     },
     samples: gpsSamples,
   };

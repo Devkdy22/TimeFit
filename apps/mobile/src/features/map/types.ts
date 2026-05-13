@@ -23,9 +23,17 @@ export interface MapRoutePath {
   points: MapCoordinate[];
 }
 
+export interface MapRouteSegment {
+  id: string;
+  mode: 'WALK' | 'BUS' | 'SUBWAY';
+  polyline: MapCoordinate[];
+  color: string;
+  zIndex: number;
+}
+
 export interface MovingMapData {
   currentLocation: CurrentLocation;
   routePath: MapRoutePath;
+  routeSegments: MapRouteSegment[];
   nextActionPoint: NextActionPoint;
 }
-

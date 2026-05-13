@@ -5,6 +5,7 @@ export const APP_ROUTES = {
   beforeStartSearch: '/before-start/search',
   beforeDepartureRecommendation: '/before-departure/recommendation',
   beforeDepartureDetail: '/before-departure/detail',
+  beforeDepartureTransitPopup: '/before-departure/transit',
   transitMain: '/transit/main',
   transitArrival: '/transit/arrival',
   reengagementRoutines: '/re-engagement/routines',

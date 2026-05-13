@@ -1,4 +1,5 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import type { SelectedRouteSummary } from '../route-recommend/model/selectedRoute';
 
 export type LocationField = 'origin' | 'destination';
 export type PlaceIconType = 'home' | 'office' | 'cafe' | 'gym' | 'school' | 'location';
@@ -20,10 +21,12 @@ interface CommutePlanContextValue {
   savedPlaces: SavedPlace[];
   recentPlaces: SavedPlace[];
   latestSelectedPlace: SavedPlace | null;
+  selectedRoute: SelectedRouteSummary | null;
   setArrivalAt: (time: string | null) => void;
   applyPlaceToField: (field: LocationField, place: SavedPlace) => void;
   clearPlaceField: (field: LocationField) => void;
   saveLatestPlace: (name: string) => SavedPlace | null;
+  setSelectedRoute: (route: SelectedRouteSummary | null) => void;
 }
 
 const initialRecentPlaces: SavedPlace[] = [
@@ -83,7 +86,7 @@ const CommutePlanContext = createContext<CommutePlanContextValue | null>(null);
 
 export function CommutePlanProvider({ children }: { children: ReactNode }) {
   const [origin, setOrigin] = useState<SavedPlace | null>(null);
-  const [destination, setDestination] = useState<SavedPlace | null>(initialRecentPlaces[0]);
+  const [destination, setDestination] = useState<SavedPlace | null>(null);
   const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>([
     {
       id: 'saved-home',
@@ -105,6 +108,7 @@ export function CommutePlanProvider({ children }: { children: ReactNode }) {
   const [recentPlaces, setRecentPlaces] = useState<SavedPlace[]>(initialRecentPlaces);
   const [latestSelectedPlace, setLatestSelectedPlace] = useState<SavedPlace | null>(null);
   const [arrivalAt, setArrivalAt] = useState<string | null>(null);
+  const [selectedRoute, setSelectedRoute] = useState<SelectedRouteSummary | null>(null);
 
   const value = useMemo<CommutePlanContextValue>(
     () => ({
@@ -114,7 +118,9 @@ export function CommutePlanProvider({ children }: { children: ReactNode }) {
       savedPlaces,
       recentPlaces,
       latestSelectedPlace,
+      selectedRoute,
       setArrivalAt,
+      setSelectedRoute,
       applyPlaceToField: (field, place) => {
         setLatestSelectedPlace(place);
         setRecentPlaces((prev) => {
@@ -153,7 +159,7 @@ export function CommutePlanProvider({ children }: { children: ReactNode }) {
         return saved;
       },
     }),
-    [arrivalAt, destination, latestSelectedPlace, origin, recentPlaces, savedPlaces],
+    [arrivalAt, destination, latestSelectedPlace, origin, recentPlaces, savedPlaces, selectedRoute],
   );
 
   return <CommutePlanContext.Provider value={value}>{children}</CommutePlanContext.Provider>;

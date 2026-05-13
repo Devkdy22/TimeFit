@@ -15,10 +15,14 @@ export function SearchContainer() {
       destinationInput={state.destinationInput}
       fieldSuggestions={state.fieldSuggestions}
       isSearchingFieldSuggestions={state.isSearchingFieldSuggestions}
+      isSettingCurrentOrigin={state.isSettingCurrentOrigin}
       mapQuery={state.mapQuery}
       mapSearchResults={state.mapSearchResults}
       isSearchingMap={state.isSearchingMap}
       mapCenter={state.mapCenter}
+      hasOriginConfigured={state.hasOriginConfigured}
+      hasDestinationConfigured={state.hasDestinationConfigured}
+      originMarker={state.originMarker}
       kakaoJsKey={state.kakaoJsKey}
       onSelectField={state.handleSelectField}
       onChangeArrivalAt={state.setArrivalAt}
@@ -27,10 +31,12 @@ export function SearchContainer() {
       onBlurField={state.handleBlurField}
       onChangeMapQuery={state.setMapQuery}
       onSelectMapResult={state.selectPlaceForActiveField}
+      onPrepareSelectSuggestion={state.prepareSelectFromSuggestion}
       onSelectRecentDestination={state.selectRecentDestination}
       onMapCenterChange={state.setMapCenter}
       onGeocodeResult={state.handleGeocodeResult}
       onApplyMapCenter={state.applyMapCenterToActiveField}
+      onPressUseCurrentOrigin={state.setOriginToCurrentLocation}
       onPressRecommendation={nav.goToRecommendation}
       onClose={nav.goBack}
     />

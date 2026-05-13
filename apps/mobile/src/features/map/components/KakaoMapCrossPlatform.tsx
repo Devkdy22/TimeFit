@@ -14,6 +14,7 @@ type MapCenter = {
 interface KakaoMapCrossPlatformProps {
   jsApiKey: string;
   center: MapCenter;
+  originMarker?: { lat: number; lng: number } | null;
   style?: StyleProp<ViewStyle>;
   onCenterChange: (next: MapCenter) => void;
   onGeocodeResult?: (info: {
@@ -30,7 +31,7 @@ type KakaoMapsGlobal = {
     load: (callback: () => void) => void;
     Map: new (container: HTMLElement, options: { center: unknown; level: number }) => KakaoMapInstance;
     LatLng: new (lat: number, lng: number) => KakaoLatLng;
-    Marker: new (options: { position: KakaoLatLng }) => KakaoMarker;
+    Marker: new (options: { position: KakaoLatLng; image?: unknown }) => KakaoMarker;
     event: {
       addListener: (target: unknown, eventName: string, listener: () => void) => void;
       removeListener?: (target: unknown, eventName: string, listener: () => void) => void;
@@ -69,6 +70,25 @@ interface KakaoMapInstance {
 interface KakaoMarker {
   setMap: (map: KakaoMapInstance | null) => void;
   setPosition: (latLng: KakaoLatLng) => void;
+}
+
+function buildPinSvgDataUri(fillHex: string, strokeHex: string) {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="34" height="42" viewBox="0 0 34 42"><path d="M17 1C8.7 1 2 7.7 2 16c0 11.1 12.2 22.1 14.1 23.8a1.4 1.4 0 0 0 1.8 0C19.8 38.1 32 27.1 32 16 32 7.7 25.3 1 17 1z" fill="${fillHex}" stroke="${strokeHex}" stroke-width="1.2"/><circle cx="17" cy="16" r="6.2" fill="#fff"/><circle cx="17" cy="16" r="2.8" fill="${fillHex}"/></svg>`;
+  return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+}
+
+function buildBlueMarkerImage(kakao: KakaoMapsGlobal) {
+  const markerImageCtor = (kakao.maps as unknown as { MarkerImage?: new (...args: unknown[]) => unknown }).MarkerImage;
+  const sizeCtor = (kakao.maps as unknown as { Size?: new (w: number, h: number) => unknown }).Size;
+  const pointCtor = (kakao.maps as unknown as { Point?: new (x: number, y: number) => unknown }).Point;
+  if (!markerImageCtor || !sizeCtor || !pointCtor) {
+    return undefined;
+  }
+  return new markerImageCtor(
+    buildPinSvgDataUri('#3E88FF', '#2A63C9'),
+    new sizeCtor(34, 42),
+    { offset: new pointCtor(17, 41) },
+  );
 }
 
 declare global {
@@ -326,6 +346,7 @@ function pickRepresentativeJibun(addresses: string[]) {
 export function KakaoMapCrossPlatform({
   jsApiKey,
   center,
+  originMarker,
   style,
   onCenterChange,
   onGeocodeResult,
@@ -642,6 +663,7 @@ export function KakaoMapCrossPlatform({
 
         const marker = new kakao.maps.Marker({
           position: centerLatLng,
+          image: buildBlueMarkerImage(kakao) as never,
         });
         marker.setMap(map);
         markerRef.current = marker;
@@ -683,6 +705,23 @@ export function KakaoMapCrossPlatform({
   }, [jsApiKey, containerId]);
 
   useEffect(() => {
+    if (!originMarker) {
+      return;
+    }
+
+    if (Platform.OS !== 'web') {
+      nativeMapRef.current?.moveMarker({ lat: originMarker.lat, lng: originMarker.lng });
+      return;
+    }
+
+    if (!window.kakao || !markerRef.current) {
+      return;
+    }
+
+    markerRef.current.setPosition(new window.kakao.maps.LatLng(originMarker.lat, originMarker.lng));
+  }, [originMarker?.lat, originMarker?.lng]);
+
+  useEffect(() => {
     if (Platform.OS !== 'web') {
       const pending = pendingNativeMoveRef.current;
       const alreadySame = pending ? isSameCenter(pending, center) : false;
@@ -692,7 +731,7 @@ export function KakaoMapCrossPlatform({
         return;
       }
 
-      if (center.source !== 'gps') {
+      if (center.source === 'user') {
         logMap('setCenter skipped', {
           source: center.source,
           reason: 'native center effect',
@@ -722,7 +761,7 @@ export function KakaoMapCrossPlatform({
       return;
     }
 
-    if (center.source !== 'gps') {
+    if (center.source === 'user') {
       logMap('setCenter skipped', {
         source: center.source,
         reason: 'web center effect',
@@ -739,7 +778,9 @@ export function KakaoMapCrossPlatform({
     pendingProgrammaticSourceRef.current = center.source;
     const next = new window.kakao.maps.LatLng(center.lat, center.lng);
     mapRef.current.setCenter(next);
-    markerRef.current.setPosition(next);
+    if (center.source === 'gps') {
+      markerRef.current.setPosition(next);
+    }
   }, [center.lat, center.lng, center.address, center.source]);
 
   if (Platform.OS === 'web') {

@@ -18,9 +18,12 @@ export interface HomeViewProps {
   status: CommuteStatus;
   statusLabel: string;
   arrivalTime: string;
+  pickerTime: string;
   destination: string;
   headline: string;
   etaLabel: string;
+  ctaLabel: string;
+  ctaTone: 'primary' | 'subtle';
   recentItems: RecentDestination[];
   onPressStart: () => void;
   onPressNewRoute: () => void;
@@ -43,9 +46,12 @@ export function HomeView({
   status,
   statusLabel,
   arrivalTime,
+  pickerTime,
   destination,
   headline,
   etaLabel,
+  ctaLabel,
+  ctaTone,
   recentItems,
   onPressStart,
   onPressNewRoute,
@@ -87,11 +93,14 @@ export function HomeView({
 
           <TimeCard
             arrivalTime={arrivalTime}
+            pickerTime={pickerTime}
             destination={destination}
             status={status}
             statusLabel={statusLabel}
             headline={headline}
             etaLabel={etaLabel}
+            ctaLabel={ctaLabel}
+            ctaTone={ctaTone}
             onPressCta={onPressStart}
             onChangeArrivalTime={onChangeArrivalTime}
             onPressDestination={onPressDestination}

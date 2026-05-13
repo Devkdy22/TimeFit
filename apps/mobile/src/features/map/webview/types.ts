@@ -1,5 +1,6 @@
 import type { StyleProp, ViewStyle } from 'react-native';
 import type { MapCoordinate } from '../types';
+import type { MapRouteSegment } from '../types';
 
 export type MapCenterSource = 'gps' | 'search' | 'user' | 'init';
 
@@ -30,4 +31,9 @@ export interface KakaoMapWebViewProps {
 
 export interface KakaoMapWebViewHandle {
   moveTo: (coordinate: MapCoordinate & { source?: MapCenterSource }) => void;
+  moveMarker: (coordinate: MapCoordinate) => void;
+  setRoutePath: (points: MapCoordinate[]) => void;
+  setRouteSegments: (segments: MapRouteSegment[]) => void;
+  setTraveledPath: (points: MapCoordinate[]) => void;
+  setPins: (pins: { origin?: MapCoordinate | null; destination?: MapCoordinate | null }) => void;
 }

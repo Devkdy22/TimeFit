@@ -196,7 +196,7 @@ function WheelColumn({
       bounces={false}
       scrollEventThrottle={16}
       getItemLayout={(_, index) => ({ length: ITEM_HEIGHT, offset: ITEM_HEIGHT * index, index })}
-      initialScrollIndex={data.indexOf(selected) + EDGE_BUFFER_ROWS}
+      initialScrollIndex={Math.max(0, data.indexOf(selected))}
       onScrollBeginDrag={() => {
         isDraggingRef.current = true;
         if (settleTimerRef.current) {

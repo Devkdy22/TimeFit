@@ -1,5 +1,5 @@
-import { useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useState } from 'react';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import type { CommuteStatus } from './types';
@@ -7,12 +7,14 @@ import { TimeWheelPicker } from './TimeWheelPicker';
 
 interface TimeCardProps {
   arrivalTime: string;
+  pickerTime?: string;
   destination: string;
   status: CommuteStatus;
   statusLabel?: string;
   headline: string;
   etaLabel: string;
   ctaLabel?: string;
+  ctaTone?: 'primary' | 'subtle';
   onPressCta?: () => void;
   onChangeArrivalTime?: (time: string) => void;
   onPressDestination?: () => void;
@@ -57,35 +59,23 @@ const statusAppearance: Record<
 
 export function TimeCard({
   arrivalTime,
+  pickerTime,
   destination,
   status,
   statusLabel,
   headline,
   etaLabel,
   ctaLabel = '출발하기',
+  ctaTone = 'primary',
   onPressCta,
   onChangeArrivalTime,
   onPressDestination,
 }: TimeCardProps) {
-  const scale = useRef(new Animated.Value(1)).current;
   const appearance = statusAppearance[status];
   const [pickerVisible, setPickerVisible] = useState(false);
-
-  const handlePressIn = () => {
-    Animated.timing(scale, {
-      toValue: 0.97,
-      duration: 90,
-      useNativeDriver: true,
-    }).start();
-  };
-
-  const handlePressOut = () => {
-    Animated.timing(scale, {
-      toValue: 1,
-      duration: 130,
-      useNativeDriver: true,
-    }).start();
-  };
+  const initialPickerTime = pickerTime ?? (/\d{2}:\d{2}/.test(arrivalTime) ? arrivalTime : '19:00');
+  const isArrivalConfigured = /\d{2}:\d{2}/.test(arrivalTime);
+  const isDestinationConfigured = !destination.includes('설정');
 
   return (
     <>
@@ -104,18 +94,37 @@ export function TimeCard({
           </View>
         </View>
 
-        <Pressable onPress={() => setPickerVisible(true)} style={styles.timePressable}>
-          <Text style={styles.arrivalTime}>{arrivalTime}</Text>
+        <Pressable
+          onPress={() => setPickerVisible(true)}
+          style={({ pressed }) => [styles.timePressable, { opacity: pressed ? 0.88 : 1 }]}
+        >
+          <View style={styles.timeActionRow}>
+            <Text style={styles.arrivalTime}>{arrivalTime}</Text>
+            <View style={styles.timeActionMeta}>
+              <View style={styles.timeActionChip}>
+                <Text style={styles.timeActionChipText}>
+                  {isArrivalConfigured ? '변경' : '도착시간 설정'}
+                </Text>
+              </View>
+            </View>
+          </View>
         </Pressable>
 
         <Pressable
           onPress={onPressDestination}
           style={({ pressed }) => [styles.destinationRow, { opacity: pressed ? 0.9 : 1 }]}
         >
-          <Ionicons name="location-outline" size={18} color={appearance.iconTint} />
-          <Text style={styles.destination} numberOfLines={1}>
-            {destination}
-          </Text>
+          <View style={styles.destinationLeft}>
+            <Ionicons name="location-outline" size={18} color={appearance.iconTint} />
+            <Text style={styles.destination} numberOfLines={1}>
+              {destination}
+            </Text>
+          </View>
+          <View style={styles.destinationActionChip}>
+            <Text style={styles.destinationActionChipText}>
+              {isDestinationConfigured ? '변경' : '도착지 설정'}
+            </Text>
+          </View>
         </Pressable>
 
         <View style={styles.divider} />
@@ -127,21 +136,25 @@ export function TimeCard({
           <Text style={styles.eta}>{etaLabel}</Text>
         </View>
 
-        <Pressable onPress={onPressCta} onPressIn={handlePressIn} onPressOut={handlePressOut}>
-          <Animated.View
+        <Pressable
+          onPress={onPressCta}
+          style={({ pressed }) => [styles.ctaPressable, pressed ? styles.ctaPressed : null]}
+        >
+          <View
             style={[
               styles.cta,
-              { transform: [{ scale }], backgroundColor: appearance.buttonColor },
+              ctaTone === 'subtle' ? styles.ctaSubtle : null,
+              { backgroundColor: ctaTone === 'subtle' ? '#D8ECEB' : appearance.buttonColor },
             ]}
           >
-            <Text style={styles.ctaText}>{ctaLabel}</Text>
-          </Animated.View>
+            <Text style={[styles.ctaText, ctaTone === 'subtle' ? styles.ctaTextSubtle : null]}>{ctaLabel}</Text>
+          </View>
         </Pressable>
       </View>
 
       <TimeWheelPicker
         visible={pickerVisible}
-        initialTime={arrivalTime}
+        initialTime={initialPickerTime}
         accentColor={appearance.iconTint}
         onClose={() => setPickerVisible(false)}
         onConfirm={(time) => {
@@ -204,25 +217,76 @@ const styles = StyleSheet.create({
   },
   timePressable: {
     marginTop: 14,
-    alignItems: 'flex-start',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#E2ECEC',
+    backgroundColor: '#F9FCFC',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  timeActionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  timeActionMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  timeActionChip: {
+    borderRadius: 999,
+    backgroundColor: '#EAF4F4',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  timeActionChipText: {
+    fontFamily: 'Pretendard-SemiBold',
+    fontSize: 12,
+    color: '#426464',
   },
   arrivalTime: {
     fontFamily: 'Pretendard-SemiBold',
-    fontSize: 52,
+    fontSize: 44,
     color: colors.textPrimary,
     letterSpacing: 0.3,
   },
   destinationRow: {
-    marginTop: 6,
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: '#F8FBFB',
+    borderWidth: 1,
+    borderColor: '#E2ECEC',
+  },
+  destinationLeft: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
   destination: {
     fontFamily: 'Pretendard-SemiBold',
-    fontSize: 28,
+    fontSize: 20,
     color: colors.textSecondary,
     flexShrink: 1,
+  },
+  destinationActionChip: {
+    borderRadius: 999,
+    backgroundColor: '#EAF4F4',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  destinationActionChipText: {
+    fontFamily: 'Pretendard-SemiBold',
+    fontSize: 12,
+    color: '#426464',
   },
   divider: {
     marginVertical: 16,
@@ -240,7 +304,6 @@ const styles = StyleSheet.create({
     color: colors.textSecondary,
   },
   cta: {
-    marginTop: 16,
     borderRadius: 999,
     paddingVertical: 14,
     alignItems: 'center',
@@ -250,9 +313,26 @@ const styles = StyleSheet.create({
     shadowRadius: 14,
     elevation: 4,
   },
+  ctaPressable: {
+    marginTop: 16,
+    borderRadius: 999,
+    overflow: 'visible',
+  },
+  ctaPressed: {
+    transform: [{ scale: 0.985 }],
+  },
   ctaText: {
     fontFamily: 'Pretendard-SemiBold',
     fontSize: 20,
     color: colors.white,
+  },
+  ctaSubtle: {
+    borderWidth: 1,
+    borderColor: '#9CCFCC',
+    shadowOpacity: 0.18,
+    elevation: 3,
+  },
+  ctaTextSubtle: {
+    color: '#1F5B58',
   },
 });

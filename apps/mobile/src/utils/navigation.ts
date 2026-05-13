@@ -10,6 +10,7 @@ export function createNavigationHelper(router: AppRouter) {
     goToSearch: () => router.push(APP_ROUTES.beforeStartSearch),
     goToRecommendation: () => router.push(APP_ROUTES.beforeDepartureRecommendation),
     goToRecommendationDetail: () => router.push(APP_ROUTES.beforeDepartureDetail),
+    goToBeforeDepartureTransitPopup: () => router.push(APP_ROUTES.beforeDepartureTransitPopup),
     goToTransit: () => router.push(APP_ROUTES.transitMain),
     goToArrival: () => router.push(APP_ROUTES.transitArrival),
     goToRoutines: () => router.push(APP_ROUTES.reengagementRoutines),

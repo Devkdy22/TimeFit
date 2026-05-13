@@ -19,6 +19,41 @@ export const movingMapMockData: MovingMapMockData = {
       { lat: 37.56652, lng: 126.97895 },
     ],
   },
+  routeSegments: [
+    {
+      id: 'mock-walk-0',
+      mode: 'WALK',
+      color: '#8A8F98',
+      zIndex: 20,
+      polyline: [
+        { lat: 37.56612, lng: 126.9771 },
+        { lat: 37.56621, lng: 126.97748 },
+        { lat: 37.56627, lng: 126.97775 },
+      ],
+    },
+    {
+      id: 'mock-bus-1',
+      mode: 'BUS',
+      color: '#2D7FF9',
+      zIndex: 30,
+      polyline: [
+        { lat: 37.56627, lng: 126.97775 },
+        { lat: 37.56631, lng: 126.97794 },
+        { lat: 37.56639, lng: 126.9783 },
+        { lat: 37.56647, lng: 126.97867 },
+      ],
+    },
+    {
+      id: 'mock-subway-2',
+      mode: 'SUBWAY',
+      color: '#00A84D',
+      zIndex: 40,
+      polyline: [
+        { lat: 37.56647, lng: 126.97867 },
+        { lat: 37.56652, lng: 126.97895 },
+      ],
+    },
+  ],
   nextActionPoint: {
     id: 'action-point-transfer',
     coordinate: { lat: 37.56647, lng: 126.97867 },

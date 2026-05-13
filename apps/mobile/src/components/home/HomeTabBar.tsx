@@ -46,6 +46,8 @@ const styles = StyleSheet.create({
     left: 16,
     right: 16,
     bottom: 10,
+    zIndex: 20,
+    elevation: 20,
   },
   container: {
     backgroundColor: 'rgba(255,255,255,0.92)',

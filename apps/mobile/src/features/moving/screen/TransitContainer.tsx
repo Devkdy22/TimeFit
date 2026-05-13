@@ -1,21 +1,33 @@
+import { useState } from 'react';
 import { useMovingState } from '../hooks/useMovingState';
 import { TransitView } from './TransitView';
 import { useNavigationHelper } from '../../../utils/navigation';
 
 export function TransitContainer() {
   const nav = useNavigationHelper();
-  const { progressPercent, remainingDistanceText, remainingTimeText, movingStatus } = useMovingState();
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const state = useMovingState();
 
   return (
     <TransitView
-      currentTime={new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })}
-      arrivalTime={`+${remainingTimeText}`}
-      remainingTime={remainingTimeText}
-      mainAction={movingStatus.nextActionText}
-      stageText={`진행 ${progressPercent}%`}
-      supportText={`남은 거리 ${remainingDistanceText} · ${movingStatus.subtitle}`}
-      status={movingStatus.status}
-      onPressDone={nav.goToArrival}
+      currentTime={state.currentTimeText}
+      arrivalTime={state.arrivalTimeText}
+      remainingTime={state.remainingTimeText}
+      mainAction={state.nextActionText}
+      stageText={state.followupActionText}
+      supportText={state.statusMessage}
+      upcomingActionTitle={state.upcomingActionTitle}
+      upcomingActionSubtitle={state.upcomingActionSubtitle}
+      upcomingActionTimeText={state.upcomingActionTimeText}
+      status={state.status}
+      isDetailOpen={isDetailOpen}
+      mapData={state.mapData}
+      originPin={state.originPin}
+      destinationPin={state.destinationPin}
+      routePathPoints={state.routePathPoints}
+      detailLines={state.detailLines}
+      onSetDetailOpen={setIsDetailOpen}
+      onPressBack={nav.goBack}
     />
   );
 }

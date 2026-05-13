@@ -7,7 +7,7 @@ import {
   type WebViewNavigation,
   type WebViewProps,
 } from 'react-native-webview';
-import type { MapCoordinate } from '../types';
+import type { MapCoordinate, MapRouteSegment } from '../types';
 import { buildKakaoMapHtml } from './html';
 import type { KakaoMapWebViewEvent, KakaoMapWebViewHandle, KakaoMapWebViewProps, MapCenterSource } from './types';
 
@@ -45,6 +45,33 @@ function buildMoveToScript(coordinate: MapCoordinate & { source?: MapCenterSourc
   return `window.moveTo && window.moveTo(${coordinate.lat}, ${coordinate.lng}, ${source}); true;`;
 }
 
+function buildMoveMarkerScript(coordinate: MapCoordinate): string {
+  return `window.moveMarker && window.moveMarker(${coordinate.lat}, ${coordinate.lng}); true;`;
+}
+
+function buildSetRoutePathScript(points: MapCoordinate[]): string {
+  const packed = JSON.stringify(points);
+  return `window.setRoutePath && window.setRoutePath(${packed}); true;`;
+}
+
+function buildSetRouteSegmentsScript(segments: MapRouteSegment[]): string {
+  const packed = JSON.stringify(segments);
+  return `window.setRouteSegments && window.setRouteSegments(${packed}); true;`;
+}
+
+function buildSetTraveledPathScript(points: MapCoordinate[]): string {
+  const packed = JSON.stringify(points);
+  return `window.setTraveledPath && window.setTraveledPath(${packed}); true;`;
+}
+
+function buildSetPinsScript(pins: { origin?: MapCoordinate | null; destination?: MapCoordinate | null }): string {
+  const packed = JSON.stringify({
+    origin: pins.origin ?? null,
+    destination: pins.destination ?? null,
+  });
+  return `window.setPins && window.setPins(${packed}); true;`;
+}
+
 export const KakaoMapWebView = forwardRef<KakaoMapWebViewHandle, KakaoMapWebViewProps>(
   function KakaoMapWebView({ jsApiKey, initialCenter, initialMarker, style, onEvent }, ref) {
     const webViewRef = useRef<WebView>(null);
@@ -66,6 +93,21 @@ export const KakaoMapWebView = forwardRef<KakaoMapWebViewHandle, KakaoMapWebView
       () => ({
         moveTo(coordinate: MapCoordinate) {
           webViewRef.current?.injectJavaScript(buildMoveToScript(coordinate));
+        },
+        moveMarker(coordinate: MapCoordinate) {
+          webViewRef.current?.injectJavaScript(buildMoveMarkerScript(coordinate));
+        },
+        setRoutePath(points: MapCoordinate[]) {
+          webViewRef.current?.injectJavaScript(buildSetRoutePathScript(points));
+        },
+        setRouteSegments(segments: MapRouteSegment[]) {
+          webViewRef.current?.injectJavaScript(buildSetRouteSegmentsScript(segments));
+        },
+        setTraveledPath(points: MapCoordinate[]) {
+          webViewRef.current?.injectJavaScript(buildSetTraveledPathScript(points));
+        },
+        setPins(pins: { origin?: MapCoordinate | null; destination?: MapCoordinate | null }) {
+          webViewRef.current?.injectJavaScript(buildSetPinsScript(pins));
         },
       }),
       [],

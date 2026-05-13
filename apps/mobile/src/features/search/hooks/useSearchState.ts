@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { inferPlaceIconType, useCommutePlan, type LocationField, type SavedPlace } from '../../commute-state/context';
-import { searchKakaoKeywordViaProxy } from '../../../services/api/client';
+import { getNearbyPoiLocationInfoViaProxy, searchKakaoKeywordViaProxy } from '../../../services/api/client';
 import type { MapCenterSource } from '../../map/webview/types';
 import { setLatestGeocodeInfo } from '../../home/location/cache.util';
+import { resolveCurrentLocationOnce } from '../../home/location/location.service';
 
 type MapCenterState = {
   lat: number;
@@ -114,6 +115,37 @@ function mapKakaoDocumentToPlace(
   };
 }
 
+function toDistanceMeters(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const earthRadius = 6371000;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+  return 2 * earthRadius * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function toClockText(date: Date) {
+  const hour = String(date.getHours()).padStart(2, '0');
+  const minute = String(date.getMinutes()).padStart(2, '0');
+  return `${hour}:${minute}`;
+}
+
+function dedupePlaces(places: SavedPlace[]) {
+  const seen = new Set<string>();
+  const deduped: SavedPlace[] = [];
+  for (const place of places) {
+    const key = `${place.name.trim().toLowerCase()}|${place.latitude.toFixed(5)}|${place.longitude.toFixed(5)}`;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    deduped.push(place);
+  }
+  return deduped;
+}
+
 export function useSearchState() {
   const {
     origin,
@@ -128,7 +160,12 @@ export function useSearchState() {
 
   const kakaoJsKey = process.env.EXPO_PUBLIC_KAKAO_JS_KEY ?? '';
 
-  const [activeField, setActiveField] = useState<LocationField>('destination');
+  const [activeField, setActiveField] = useState<LocationField>(() => {
+    if (origin && !destination) {
+      return 'origin';
+    }
+    return 'destination';
+  });
   const [originInput, setOriginInput] = useState(origin?.name ?? '');
   const [destinationInput, setDestinationInput] = useState(destination?.name ?? '');
   const [isOriginFocused, setIsOriginFocused] = useState(false);
@@ -139,6 +176,13 @@ export function useSearchState() {
   const [fieldSuggestions, setFieldSuggestions] = useState<SavedPlace[]>([]);
   const [isSearchingMap, setIsSearchingMap] = useState(false);
   const [isSearchingFieldSuggestions, setIsSearchingFieldSuggestions] = useState(false);
+  const [isSettingCurrentOrigin, setIsSettingCurrentOrigin] = useState(false);
+  const destinationSyncTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const ignoreNextBlurRef = useRef<{ field: LocationField; expiresAt: number } | null>(null);
+  const lastNearbyFetchCenterRef = useRef<{ lat: number; lng: number } | null>(null);
+  const lastMapQueryFetchRef = useRef<string>('');
+  const lastNearbyFetchKeyRef = useRef<string>('');
+  const lastKeywordRequestKeyRef = useRef<string>('');
 
   const [mapCenter, setMapCenter] = useState<MapCenterState>(() => {
     if (origin) {
@@ -238,11 +282,43 @@ export function useSearchState() {
     });
   }, [activeField, origin, destination]);
 
-  const searchPlaces = async (keyword: string) => {
+  const searchPlaces = async (keyword: string, options?: { preferNearby?: boolean }) => {
     const normalized = keyword.trim().toLowerCase();
+    const preferNearby = options?.preferNearby ?? false;
+
+    if (normalized.length === 0 && preferNearby) {
+      try {
+        const nearby = await getNearbyPoiLocationInfoViaProxy(mapCenter.lat, mapCenter.lng, 320);
+        const mappedNearby = (nearby.candidates ?? [])
+          .filter((item) => Number.isFinite(item.lat) && Number.isFinite(item.lng))
+          .sort((a, b) => a.distance - b.distance)
+          .map((item, index) => ({
+            id: `nearby-${index}-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            name: item.name,
+            address: nearby.roadAddress || nearby.jibunAddress || mapCenter.address,
+            latitude: item.lat,
+            longitude: item.lng,
+            iconType: inferPlaceIconType(item.name),
+          } as SavedPlace));
+
+        if (mappedNearby.length > 0) {
+          return dedupePlaces(mappedNearby).slice(0, 8);
+        }
+      } catch {
+        // fallback to local list
+      }
+    }
 
     if (normalized.length === 0) {
-      return localSearchBase.slice(0, 6);
+      return dedupePlaces(
+        [...localSearchBase]
+        .sort((a, b) => {
+          const distanceA = toDistanceMeters(mapCenter.lat, mapCenter.lng, a.latitude, a.longitude);
+          const distanceB = toDistanceMeters(mapCenter.lat, mapCenter.lng, b.latitude, b.longitude);
+          return distanceA - distanceB;
+        })
+          .slice(0, 6),
+      );
     }
 
     try {
@@ -252,32 +328,97 @@ export function useSearchState() {
         .filter((item): item is SavedPlace => item != null);
 
       if (mapped.length > 0) {
-        return mapped.slice(0, 8);
+        return dedupePlaces(mapped)
+          .sort((a, b) => {
+            const distanceA = toDistanceMeters(mapCenter.lat, mapCenter.lng, a.latitude, a.longitude);
+            const distanceB = toDistanceMeters(mapCenter.lat, mapCenter.lng, b.latitude, b.longitude);
+            return distanceA - distanceB;
+          })
+          .slice(0, 8);
       }
     } catch {
       // proxy unavailable -> fallback to local search results
     }
 
-    return localSearchBase
+    return dedupePlaces(
+      localSearchBase
       .filter((place) => {
         return (
           place.name.toLowerCase().includes(normalized) ||
           place.address.toLowerCase().includes(normalized)
         );
       })
-      .slice(0, 6);
+        .slice(0, 6),
+    );
   };
 
+  // 1) 텍스트 입력 기반 추천: 입력 시 빠르게 1회만 갱신
   useEffect(() => {
     let cancelled = false;
     const keyword = mapQuery.trim();
+    const normalized = keyword.toLowerCase();
+    if (!normalized) {
+      lastMapQueryFetchRef.current = '';
+      lastKeywordRequestKeyRef.current = '';
+      return;
+    }
+    const centerKey = `${mapCenter.lat.toFixed(4)},${mapCenter.lng.toFixed(4)}`;
+    const keywordRequestKey = `${normalized}|${centerKey}`;
+    if (lastKeywordRequestKeyRef.current === keywordRequestKey) {
+      return;
+    }
 
     const timer = setTimeout(async () => {
       try {
         setIsSearchingMap(true);
-        const result = await searchPlaces(keyword);
+        const result = await searchPlaces(keyword, { preferNearby: false });
         if (!cancelled) {
-          setMapSearchResults(result);
+          lastMapQueryFetchRef.current = normalized;
+          lastKeywordRequestKeyRef.current = keywordRequestKey;
+          setMapSearchResults(dedupePlaces(result));
+        }
+      } catch {
+        if (!cancelled) {
+          lastKeywordRequestKeyRef.current = keywordRequestKey;
+          setMapSearchResults([]);
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSearchingMap(false);
+        }
+      }
+    }, 220);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [mapQuery, mapCenter.lat, mapCenter.lng]);
+
+  // 2) 지도 이동 기반 추천: 사용자가 멈춘 뒤(3~5초) 1회만 갱신
+  useEffect(() => {
+    const centerKey = `${mapCenter.lat.toFixed(5)},${mapCenter.lng.toFixed(5)}`;
+    if (lastNearbyFetchKeyRef.current === centerKey) {
+      return;
+    }
+
+    const last = lastNearbyFetchCenterRef.current;
+    if (last) {
+      const movedMeters = toDistanceMeters(last.lat, last.lng, mapCenter.lat, mapCenter.lng);
+      if (movedMeters < 10) {
+        return;
+      }
+    }
+
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        setIsSearchingMap(true);
+        const result = await searchPlaces('', { preferNearby: true });
+        if (!cancelled) {
+          lastNearbyFetchCenterRef.current = { lat: mapCenter.lat, lng: mapCenter.lng };
+          lastNearbyFetchKeyRef.current = centerKey;
+          setMapSearchResults(dedupePlaces(result));
         }
       } catch {
         if (!cancelled) {
@@ -288,48 +429,77 @@ export function useSearchState() {
           setIsSearchingMap(false);
         }
       }
-    }, 240);
+    }, 4000);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [mapQuery, localSearchBase]);
+  }, [mapCenter.lat, mapCenter.lng, localSearchBase]);
 
   const activeFieldInput = activeField === 'origin' ? originInput : destinationInput;
 
   useEffect(() => {
     const keyword = activeFieldInput.trim();
-
-    if (keyword.length === 0) {
+    if (!keyword) {
       setFieldSuggestions([]);
+      setIsSearchingFieldSuggestions(false);
       return;
     }
 
-    let cancelled = false;
-    const timer = setTimeout(async () => {
-      try {
-        setIsSearchingFieldSuggestions(true);
-        const result = await searchPlaces(keyword);
-        if (!cancelled) {
-          setFieldSuggestions(result);
-        }
-      } catch {
-        if (!cancelled) {
-          setFieldSuggestions([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setIsSearchingFieldSuggestions(false);
-        }
+    // 필드 제안은 네트워크를 다시 치지 않고, 이미 받은 mapSearchResults + 로컬 후보에서 즉시 구성
+    const normalized = keyword.toLowerCase();
+    const localMatches = localSearchBase.filter((place) => {
+      return (
+        place.name.toLowerCase().includes(normalized) ||
+        place.address.toLowerCase().includes(normalized)
+      );
+    });
+
+    const merged = [...mapSearchResults, ...localMatches];
+    const seen = new Set<string>();
+    const deduped: SavedPlace[] = [];
+    for (const place of merged) {
+      if (seen.has(place.id)) {
+        continue;
       }
-    }, 200);
+      seen.add(place.id);
+      deduped.push(place);
+      if (deduped.length >= 8) {
+        break;
+      }
+    }
+
+    setIsSearchingFieldSuggestions(false);
+    setFieldSuggestions(deduped);
+  }, [activeFieldInput, activeField, localSearchBase, mapSearchResults]);
+
+  useEffect(() => {
+    if (activeField !== 'destination') {
+      return;
+    }
+    if (mapCenter.source !== 'user' && mapCenter.source !== 'search') {
+      return;
+    }
+    if (!mapCenter.address?.trim()) {
+      return;
+    }
+
+    if (destinationSyncTimerRef.current) {
+      clearTimeout(destinationSyncTimerRef.current);
+    }
+
+    destinationSyncTimerRef.current = setTimeout(() => {
+      const name = mapCenter.address.trim();
+      setDestinationInput(name);
+    }, 700);
 
     return () => {
-      cancelled = true;
-      clearTimeout(timer);
+      if (destinationSyncTimerRef.current) {
+        clearTimeout(destinationSyncTimerRef.current);
+      }
     };
-  }, [activeFieldInput, activeField, localSearchBase]);
+  }, [activeField, mapCenter]);
 
   const recentDestinationCards = useMemo(() => {
     const previewTimes = ['18:45', '13:00', '19:00'];
@@ -339,11 +509,20 @@ export function useSearchState() {
     }));
   }, [recentPlaces]);
 
-  const applyTypedField = (field: LocationField) => {
-    const typedValue = field === 'origin' ? originInput.trim() : destinationInput.trim();
+  function normalizePlaceLabel(value: string) {
+    return value.trim().replace(/\s+/g, ' ');
+  }
+
+  const applyTypedField = (field: LocationField, typedText?: string) => {
+    const typedValue = (typedText ?? (field === 'origin' ? originInput : destinationInput)).trim();
 
     if (typedValue.length === 0) {
       clearPlaceField(field);
+      return;
+    }
+
+    const currentPlace = field === 'origin' ? origin : destination;
+    if (currentPlace && normalizePlaceLabel(currentPlace.name) === normalizePlaceLabel(typedValue)) {
       return;
     }
 
@@ -360,13 +539,33 @@ export function useSearchState() {
     setActiveField(field);
   };
 
-  const handleBlurField = (field: LocationField) => {
+  const handleBlurField = (field: LocationField, typedText?: string) => {
+    const ignoreToken = ignoreNextBlurRef.current;
+    if (ignoreToken && ignoreToken.field === field && ignoreToken.expiresAt > Date.now()) {
+      ignoreNextBlurRef.current = null;
+      if (field === 'origin') {
+        setIsOriginFocused(false);
+      } else {
+        setIsDestinationFocused(false);
+      }
+      return;
+    }
+
     if (field === 'origin') {
       setIsOriginFocused(false);
     } else {
       setIsDestinationFocused(false);
     }
-    applyTypedField(field);
+
+    const trimmed = (typedText ?? (field === 'origin' ? originInput : destinationInput)).trim();
+    const currentPlace = field === 'origin' ? origin : destination;
+    if (currentPlace && normalizePlaceLabel(currentPlace.name) === normalizePlaceLabel(trimmed)) {
+      return;
+    }
+
+    // blur 시 자동 1순위 후보를 다시 조회/적용하지 않는다.
+    // 사용자가 명시적으로 고른 장소를 비동기 검색 결과가 덮어쓰는 문제를 방지한다.
+    applyTypedField(field, typedText);
   };
 
   const selectPlaceToField = (field: LocationField, place: SavedPlace) => {
@@ -374,21 +573,42 @@ export function useSearchState() {
 
     if (field === 'origin') {
       setOriginInput(place.name);
-    } else {
-      setDestinationInput(place.name);
+      return;
     }
 
-    setMapCenter({
-      lat: place.latitude,
-      lng: place.longitude,
-      address: place.address,
-      source: 'search',
-      accuracy: place.accuracy,
+    setDestinationInput(place.name);
+    setMapCenter((prev) => {
+      const sameLat = Math.abs(prev.lat - place.latitude) <= 0.000002;
+      const sameLng = Math.abs(prev.lng - place.longitude) <= 0.000002;
+      const sameAddress = prev.address === place.address;
+      if (sameLat && sameLng && sameAddress && prev.source === 'search') {
+        return prev;
+      }
+      return {
+        lat: place.latitude,
+        lng: place.longitude,
+        address: place.address,
+        source: 'search',
+        accuracy: place.accuracy,
+      };
     });
   };
 
   const selectPlaceForActiveField = (place: SavedPlace) => {
     selectPlaceToField(activeField, place);
+    setFieldSuggestions([]);
+  };
+
+  const prepareSelectFromSuggestion = (field: LocationField) => {
+    ignoreNextBlurRef.current = {
+      field,
+      expiresAt: Date.now() + 1500,
+    };
+  };
+
+  const selectPlaceForDestination = (place: SavedPlace) => {
+    selectPlaceToField('destination', place);
+    setActiveField('destination');
     setFieldSuggestions([]);
   };
 
@@ -413,6 +633,40 @@ export function useSearchState() {
     selectPlaceToField(activeField, nextPlace);
     setFieldSuggestions([]);
   };
+
+  const setOriginToCurrentLocation = async () => {
+    if (isSettingCurrentOrigin) {
+      return;
+    }
+
+    setIsSettingCurrentOrigin(true);
+    try {
+      const resolved = await resolveCurrentLocationOnce({ forceFresh: true });
+      const name = resolved.locationInfo.roadAddress || resolved.locationInfo.jibunAddress || resolved.finalName || '내 위치';
+      const address = resolved.locationInfo.roadAddress || resolved.locationInfo.jibunAddress || resolved.finalName || '내 위치';
+
+      const place: SavedPlace = {
+        id: `current-location-resolved-${Date.now()}`,
+        name,
+        address,
+        latitude: resolved.pinPosition.lat,
+        longitude: resolved.pinPosition.lng,
+        accuracy: resolved.accuracy ?? undefined,
+        iconType: 'location',
+      };
+
+      selectPlaceToField('origin', place);
+      setActiveField('origin');
+      setFieldSuggestions([]);
+    } catch (error) {
+      console.info('[Search]', 'set current origin failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setIsSettingCurrentOrigin(false);
+    }
+  };
+
 
   const handleGeocodeResult = (info: {
     lat: number;
@@ -444,6 +698,8 @@ export function useSearchState() {
     if (
       origin &&
       refinedName &&
+      activeField === 'origin' &&
+      mapCenter.source === 'gps' &&
       (origin.id.includes('current-location-resolved') || origin.name.trim() === '내 위치')
     ) {
       // 현재 위치(origin)는 GPS 원본 좌표를 유지하고, 주소/이름 텍스트만 보정한다.
@@ -456,6 +712,15 @@ export function useSearchState() {
         longitude: origin.longitude,
         accuracy: origin.accuracy,
       });
+    }
+
+    // 도착지 조작 맥락에서만 도착지 입력창을 반영한다.
+    if (
+      refinedName &&
+      (activeField === 'destination' || destination != null) &&
+      (mapCenter.source === 'user' || mapCenter.source === 'search')
+    ) {
+      setDestinationInput(refinedName);
     }
 
     setMapCenter((prev) => {
@@ -472,16 +737,20 @@ export function useSearchState() {
 
   return {
     activeField,
-    arrivalAt: arrivalAt ?? '19:00',
+    arrivalAt: arrivalAt ?? toClockText(new Date()),
     recentDestinationCards,
     originInput,
     destinationInput,
     fieldSuggestions,
     isSearchingFieldSuggestions,
+    isSettingCurrentOrigin,
     mapQuery,
     mapSearchResults,
     isSearchingMap,
     mapCenter,
+    hasOriginConfigured: origin != null,
+    hasDestinationConfigured: destination != null,
+    originMarker: origin ? { lat: origin.latitude, lng: origin.longitude } : null,
     geocodeInfo,
     kakaoJsKey,
     setArrivalAt,
@@ -495,7 +764,10 @@ export function useSearchState() {
     handleGeocodeResult,
     applyTypedField,
     selectPlaceForActiveField,
+    prepareSelectFromSuggestion,
+    selectPlaceForDestination,
     selectRecentDestination,
     applyMapCenterToActiveField,
+    setOriginToCurrentLocation,
   };
 }

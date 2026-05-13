@@ -7,17 +7,16 @@
     "dev": "expo start",
     "build": "echo 'mobile build is handled by EAS later'",
     "lint": "eslint .",
-    "postinstall": "install-skia",
     "android": "expo run:android",
     "ios": "expo run:ios"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",
     "@react-native-async-storage/async-storage": "^2.2.0",
-    "@react-native-community/datetimepicker": "^9.1.0",
-    "@shopify/react-native-skia": "^2.6.2",
+    "@react-native-community/datetimepicker": "8.4.4",
+    "@shopify/react-native-skia": "2.2.12",
     "@types/react-dom": "~19.1.7",
-    "expo": "~54.0.33",
+    "expo": "~54.0.34",
     "expo-location": "~19.0.8",
     "expo-router": "~6.0.23",
     "react": "19.1.0",
@@ -25,15 +24,17 @@
     "react-native": "0.81.5",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-kakao-maps": "^0.1.2",
+    "react-native-maps": "1.20.1",
     "react-native-reanimated": "~4.1.7",
     "react-native-safe-area-context": "~5.6.2",
     "react-native-screens": "~4.16.0",
     "react-native-svg": "15.12.1",
     "react-native-web": "~0.21.2",
-    "react-native-webview": "^13.16.1",
+    "react-native-webview": "13.15.0",
     "react-native-worklets": "0.5.1"
   },
   "devDependencies": {
+    "@babel/plugin-transform-typescript": "^7.28.6",
     "@types/react": "~19.1.10",
     "typescript": "^5.6.3"
   }
