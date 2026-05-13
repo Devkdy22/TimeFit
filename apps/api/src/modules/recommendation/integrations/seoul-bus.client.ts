@@ -25,7 +25,7 @@ export interface NearestStation {
   stationName: string;
 }
 
-export interface NearbyStation extends NearestStation {}
+export type NearbyStation = NearestStation;
 
 export interface SeoulBusArrivalResult {
   stationId: string;

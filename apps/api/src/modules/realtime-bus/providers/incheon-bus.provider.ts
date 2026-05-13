@@ -37,7 +37,8 @@ export class IncheonBusProvider implements BusProvider {
     ];
   }
 
-  async findRouteCandidates(station: StationCandidate, _context: ProviderResolveContext): Promise<RouteCandidate[]> {
+  async findRouteCandidates(station: StationCandidate, context: ProviderResolveContext): Promise<RouteCandidate[]> {
+    void context;
     const rows = await this.request('/busArrivalService/getAllRouteBusArrivalList', {
       pageNo: '1',
       numOfRows: '100',

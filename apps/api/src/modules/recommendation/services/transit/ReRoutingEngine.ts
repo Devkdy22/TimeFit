@@ -160,7 +160,7 @@ export class ReRoutingEngine {
         nextBestRoute: nextBest,
         reason: `reroute_triggered:${triggerReason}:better_route_found`,
       };
-    } catch (error) {
+    } catch {
       this.eventBus.emit('REROUTE_TRIGGERED', {
         tripId: currentRoute.id,
         routeId: currentRoute.id,

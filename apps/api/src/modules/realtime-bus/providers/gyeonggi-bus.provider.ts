@@ -39,7 +39,8 @@ export class GyeonggiBusProvider implements BusProvider {
       .filter((item) => item.stationId && item.stationName);
   }
 
-  async findRouteCandidates(station: StationCandidate, _context: ProviderResolveContext): Promise<RouteCandidate[]> {
+  async findRouteCandidates(station: StationCandidate, context: ProviderResolveContext): Promise<RouteCandidate[]> {
+    void context;
     const rows = await this.request('/busarrivalservice/v2/getBusArrivalListv2', {
       stationId: station.stationId,
       format: 'json',

@@ -2,8 +2,10 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { randomUUID } from 'crypto';
 import type { RoutineEntity } from '../types/routine.types';
 
-interface CreateRoutineInput
-  extends Omit<RoutineEntity, 'id' | 'active' | 'lastTriggeredAt' | 'createdAt' | 'updatedAt'> {}
+type CreateRoutineInput = Omit<
+  RoutineEntity,
+  'id' | 'active' | 'lastTriggeredAt' | 'createdAt' | 'updatedAt'
+>;
 
 @Injectable()
 export class RoutinesRepository {

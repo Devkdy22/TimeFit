@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
+import { PrismaClient } from '@prisma/client';
 import type { OdsayUsageSnapshot } from '../types/transit';
 
 let dbUnavailableLogged = false;
 
 @Injectable()
 export class OdsayUsageRepository {
-  private prisma: any;
+  private prisma: PrismaClient | null = null;
 
   async increment(date: string, timezone: string, deltas: Partial<Record<keyof Omit<OdsayUsageSnapshot, 'date' | 'timezone'>, number>>) {
     const prisma = this.getPrismaClient();
@@ -75,14 +76,12 @@ export class OdsayUsageRepository {
     };
   }
 
-  private getPrismaClient() {
+  private getPrismaClient(): PrismaClient {
     if (this.prisma) {
       return this.prisma;
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { PrismaClient } = require('@prisma/client');
-    const globalForPrisma = globalThis as unknown as { prisma?: any };
+    const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
     this.prisma = globalForPrisma.prisma ?? new PrismaClient();
     if (!globalForPrisma.prisma) {
       globalForPrisma.prisma = this.prisma;
