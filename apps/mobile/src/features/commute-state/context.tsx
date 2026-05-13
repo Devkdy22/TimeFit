@@ -76,12 +76,6 @@ export function inferPlaceIconType(name: string): PlaceIconType {
   return 'location';
 }
 
-function toClockText(date: Date) {
-  const hour = String(date.getHours()).padStart(2, '0');
-  const minute = String(date.getMinutes()).padStart(2, '0');
-  return `${hour}:${minute}`;
-}
-
 const CommutePlanContext = createContext<CommutePlanContextValue | null>(null);
 
 export function CommutePlanProvider({ children }: { children: ReactNode }) {

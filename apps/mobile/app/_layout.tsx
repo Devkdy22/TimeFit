@@ -4,11 +4,13 @@ import { Stack } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { CommutePlanProvider } from '../src/features/commute-state/context';
+import PretendardMedium from '../assets/fonts/Pretendard-Medium.ttf';
+import PretendardSemiBold from '../assets/fonts/Pretendard-SemiBold.ttf';
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
-    'Pretendard-Medium': require('../assets/fonts/Pretendard-Medium.ttf'),
-    'Pretendard-SemiBold': require('../assets/fonts/Pretendard-SemiBold.ttf'),
+    'Pretendard-Medium': PretendardMedium,
+    'Pretendard-SemiBold': PretendardSemiBold,
   });
 
   if (!fontsLoaded && !fontError) {

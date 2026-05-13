@@ -6,6 +6,20 @@ type WebCenter = {
   lng: number;
 };
 
+type KakaoLatLng = {
+  getLat: () => number;
+  getLng: () => number;
+};
+
+type KakaoMapInstance = {
+  setCenter: (latLng: KakaoLatLng) => void;
+};
+
+type KakaoMarkerInstance = {
+  setMap: (map: KakaoMapInstance) => void;
+  setPosition: (latLng: KakaoLatLng) => void;
+};
+
 interface MapWebProps {
   jsApiKey: string;
   center: WebCenter;
@@ -16,14 +30,9 @@ type KakaoWindow = Window & {
   kakao?: {
     maps: {
       load: (cb: () => void) => void;
-      LatLng: new (lat: number, lng: number) => { getLat: () => number; getLng: () => number };
-      Map: new (container: HTMLElement, options: { center: unknown; level: number }) => {
-        setCenter: (latLng: unknown) => void;
-      };
-      Marker: new (options: { position: unknown }) => {
-        setMap: (map: unknown) => void;
-        setPosition: (latLng: unknown) => void;
-      };
+      LatLng: new (lat: number, lng: number) => KakaoLatLng;
+      Map: new (container: HTMLElement, options: { center: KakaoLatLng; level: number }) => KakaoMapInstance;
+      Marker: new (options: { position: KakaoLatLng }) => KakaoMarkerInstance;
     };
   };
 };
@@ -33,8 +42,8 @@ export function MapWeb({ jsApiKey, center, marker }: MapWebProps) {
     () => `kakao-web-map-${Math.random().toString(36).slice(2, 10)}`,
     [],
   );
-  const mapRef = useRef<any>(null);
-  const markerRef = useRef<any>(null);
+  const mapRef = useRef<KakaoMapInstance | null>(null);
+  const markerRef = useRef<KakaoMarkerInstance | null>(null);
 
   // 웹용 카카오 JS SDK 로딩 및 초기화
   useEffect(() => {

@@ -16,13 +16,25 @@ type Coordinate = {
   lng: number;
 };
 
+type KakaoLatLng = unknown;
+type KakaoMapInstance = {
+  setCenter: (latLng: KakaoLatLng) => void;
+};
+type KakaoMarkerInstance = {
+  setMap: (map: KakaoMapInstance) => void;
+  setPosition: (latLng: KakaoLatLng) => void;
+};
+
 type KakaoWindow = Window & {
   kakao?: {
     maps: {
       load: (cb: () => void) => void;
-      LatLng: new (lat: number, lng: number) => unknown;
-      Map: new (container: HTMLElement, options: { center: unknown; level: number }) => any;
-      Marker: new (options: { position: unknown }) => any;
+      LatLng: new (lat: number, lng: number) => KakaoLatLng;
+      Map: new (
+        container: HTMLElement,
+        options: { center: KakaoLatLng; level: number },
+      ) => KakaoMapInstance;
+      Marker: new (options: { position: KakaoLatLng }) => KakaoMarkerInstance;
     };
   };
 };
@@ -38,8 +50,8 @@ export function MapScreen() {
   const [center, setCenter] = useState<Coordinate>(DEFAULT_COORDINATE);
   const [mapContainerId] = useState<string>(() => `kakao-web-map-${Math.random().toString(36).slice(2, 10)}`);
 
-  const webMapRef = useRef<any>(null);
-  const webMarkerRef = useRef<any>(null);
+  const webMapRef = useRef<KakaoMapInstance | null>(null);
+  const webMarkerRef = useRef<KakaoMarkerInstance | null>(null);
 
   const kakaoJsKey = process.env.EXPO_PUBLIC_KAKAO_JS_KEY ?? '';
 
