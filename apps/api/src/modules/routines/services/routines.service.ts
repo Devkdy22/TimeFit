@@ -5,6 +5,7 @@ import { RecommendationService } from '../../recommendation/services/recommendat
 import { RoutinesRepository } from './routines.repository';
 import { CreateRoutineDto } from '../dto/create-routine.dto';
 import type { RoutineEntity } from '../types/routine.types';
+import type { RecommendationResult, RecommendationResponse } from '../../recommendation/types/recommendation.types';
 
 @Injectable()
 export class RoutinesService implements OnModuleInit, OnModuleDestroy {
@@ -96,7 +97,7 @@ export class RoutinesService implements OnModuleInit, OnModuleDestroy {
 
     this.routinesRepository.markTriggered(routine.id, now.toISOString());
 
-    if (routine.expoPushToken) {
+    if (routine.expoPushToken && this.isRecommendationResult(recommendation)) {
       await this.notificationService.sendRoutineNotification({
         pushToken: routine.expoPushToken,
         routineId: routine.id,
@@ -106,17 +107,30 @@ export class RoutinesService implements OnModuleInit, OnModuleDestroy {
       });
     }
 
-    this.logger.log(
-      {
-        event: 'routine.automation.generated',
-        routineId: routine.id,
-        userId: routine.userId,
-        arrivalAt: arrivalAt.toISOString(),
-        primaryRouteId: recommendation.primaryRoute.route.id,
-        status: recommendation.status,
-      },
-      RoutinesService.name,
-    );
+    if (this.isRecommendationResult(recommendation)) {
+      this.logger.log(
+        {
+          event: 'routine.automation.generated',
+          routineId: routine.id,
+          userId: routine.userId,
+          arrivalAt: arrivalAt.toISOString(),
+          primaryRouteId: recommendation.primaryRoute.route.id,
+          status: recommendation.status,
+        },
+        RoutinesService.name,
+      );
+    } else {
+      this.logger.warn(
+        {
+          event: 'routine.automation.empty',
+          routineId: routine.id,
+          userId: routine.userId,
+          arrivalAt: arrivalAt.toISOString(),
+          emptyState: recommendation.emptyState,
+        },
+        RoutinesService.name,
+      );
+    }
 
     return recommendation;
   }
@@ -153,5 +167,11 @@ export class RoutinesService implements OnModuleInit, OnModuleDestroy {
     const date = new Date(base);
     date.setHours(Number.isFinite(hour) ? hour : 9, Number.isFinite(minute) ? minute : 0, 0, 0);
     return date;
+  }
+
+  private isRecommendationResult(
+    response: RecommendationResponse,
+  ): response is RecommendationResult {
+    return 'primaryRoute' in response;
   }
 }

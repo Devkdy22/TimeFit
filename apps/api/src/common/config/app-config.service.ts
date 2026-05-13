@@ -48,6 +48,10 @@ export class AppConfigService {
   }
 
   get seoulApiKey() {
+    const openApiKey = this.configService.get('SEOUL_OPEN_API_KEY', { infer: true });
+    if (openApiKey) {
+      return openApiKey;
+    }
     return this.configService.get('SEOUL_API_KEY', { infer: true });
   }
 
@@ -67,8 +71,40 @@ export class AppConfigService {
     return this.configService.get('SEOUL_BUS_API_URL', { infer: true });
   }
 
+  get seoulBusKey() {
+    return this.configService.get('SEOUL_BUS_KEY', { infer: true });
+  }
+
+  get gyeonggiBusApiUrl() {
+    return this.configService.get('GYEONGGI_BUS_API_URL', { infer: true });
+  }
+
+  get gyeonggiBusKey() {
+    return this.configService.get('GYEONGGI_BUS_KEY', { infer: true });
+  }
+
+  get incheonBusApiUrl() {
+    return this.configService.get('INCHEON_BUS_API_URL', { infer: true });
+  }
+
+  get incheonBusKey() {
+    return this.configService.get('INCHEON_BUS_KEY', { infer: true });
+  }
+
   get seoulSubwayApiUrl() {
     return this.configService.get('SEOUL_SUBWAY_API_URL', { infer: true });
+  }
+
+  get odsayApiKey() {
+    return this.configService.get('ODSAY_API_KEY', { infer: true });
+  }
+
+  get odsayApiUrl() {
+    return this.configService.get('ODSAY_API_URL', { infer: true });
+  }
+
+  get recommendationTransferBufferMinutes() {
+    return this.configService.get('RECOMMENDATION_TRANSFER_BUFFER_MINUTES', { infer: true });
   }
 
   get fcmServerKey() {

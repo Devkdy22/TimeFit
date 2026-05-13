@@ -13,15 +13,30 @@ interface RouteScoreInput {
 }
 
 export function calculateRouteScore(input: RouteScoreInput): ScoredRoute {
+  const requiredEarlyBufferMinutes = Math.max(5, input.preference.preferredBufferMinutes);
+  const targetArrivalAt = new Date(
+    input.arrivalAt.getTime() - requiredEarlyBufferMinutes * 60_000,
+  );
   const expectedDelayMinutes = Math.round(input.route.delayRisk * 5);
-  const expectedTravelMinutes = input.route.estimatedTravelMinutes + expectedDelayMinutes;
+  const baselineTravelMinutes =
+    input.route.realtimeAdjustedDurationMinutes ?? input.route.estimatedTravelMinutes;
+  // Include realtime delay risk when deriving recommended departure time.
+  const expectedTravelMinutes = baselineTravelMinutes + expectedDelayMinutes;
+  const now = new Date();
+  const readyAt = new Date(now.getTime() + input.preference.prepMinutes * 60_000);
 
+  // Arrival-first model with safety buffer: arrive before user's requested time.
   const departureAt = new Date(
-    input.arrivalAt.getTime() - input.route.estimatedTravelMinutes * 60_000,
+    targetArrivalAt.getTime() - expectedTravelMinutes * 60_000,
   );
 
-  const expectedArrivalAt = new Date(departureAt.getTime() + expectedTravelMinutes * 60_000);
-  const bufferMinutes = Math.floor((input.arrivalAt.getTime() - expectedArrivalAt.getTime()) / 60_000);
+  const expectedArrivalAtByReady = new Date(readyAt.getTime() + expectedTravelMinutes * 60_000);
+  const scheduledExpectedArrivalAt = new Date(departureAt.getTime() + expectedTravelMinutes * 60_000);
+  // If planned departure is already in the past, expose the physically reachable arrival time.
+  const expectedArrivalAt = new Date(
+    Math.max(scheduledExpectedArrivalAt.getTime(), expectedArrivalAtByReady.getTime()),
+  );
+  const bufferMinutes = Math.floor((targetArrivalAt.getTime() - expectedArrivalAtByReady.getTime()) / 60_000);
 
   const punctuality = getPunctualityScore(bufferMinutes);
   const safety = getSafetyScore(bufferMinutes, input.preference.preferredBufferMinutes);
@@ -99,8 +114,11 @@ function getEarlyArrivalPenalty(bufferMinutes: number): number {
   if (bufferMinutes <= earlyThreshold) {
     return 0;
   }
-
-  return (bufferMinutes - earlyThreshold) * 1.5;
+  // Excessively early departures should be discouraged,
+  // but the penalty must be capped so scores do not collapse to zero.
+  const over = bufferMinutes - earlyThreshold;
+  const cappedOver = Math.min(over, 20);
+  return cappedOver * 1.5;
 }
 
 function getBufferPenalty(bufferMinutes: number): number {

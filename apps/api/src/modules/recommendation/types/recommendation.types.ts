@@ -1,3 +1,6 @@
+import type { KakaoMapOverlay } from './transit';
+import type { RouteDiagnostics } from '../dto/integration/normalized-route.dto';
+
 export interface LocationInput {
   name: string;
   lat: number;
@@ -13,18 +16,85 @@ export type RouteType =
   | 'subway'
   | 'car';
 
+export type MobilityMode = 'walk' | 'bus' | 'subway' | 'car';
+export type RealtimeStatus =
+  | 'SCHEDULED'
+  | 'LIVE'
+  | 'DELAYED'
+  | 'STALE'
+  | 'CHECKING'
+  | 'UNAVAILABLE';
+export type DelayRiskLevel = 'LOW' | 'MEDIUM' | 'HIGH';
+
+export interface MobilityRealtimeInfo {
+  etaMinutes?: number;
+  etaSeconds?: number;
+  remainingStops?: number;
+  trainStatusMessage?: string;
+  matchingConfidence?: number;
+  reasonCode?: string;
+  source?: 'SEOUL_API' | 'GYEONGGI_API' | 'INCHEON_API' | 'CACHE';
+  updatedAt?: string;
+  debug?: Record<string, unknown>;
+}
+
+export interface SegmentCandidate {
+  route: string;
+  etaMinutes: number;
+  etaSeconds?: number;
+  direction?: string;
+}
+
+export interface MobilitySegment {
+  mode: MobilityMode;
+  durationMinutes: number;
+  lineLabel?: string;
+  lineId?: string;
+  directionLabel?: string;
+  transferTip?: string;
+  startName?: string;
+  endName?: string;
+  startStationId?: string;
+  endStationId?: string;
+  startArsId?: string;
+  endArsId?: string;
+  busRouteId?: string;
+  stationCount?: number;
+  distanceMeters?: number;
+  startLat?: number;
+  startLng?: number;
+  endLat?: number;
+  endLng?: number;
+  passStops?: string[];
+  realtimeAdjustedDurationMinutes?: number;
+  realtimeStatus?: RealtimeStatus;
+  delayMinutes?: number;
+  realtimeInfo?: MobilityRealtimeInfo;
+  candidates?: SegmentCandidate[];
+}
+
 export interface RouteCandidate {
   id: string;
   name: string;
   source: 'api' | 'fallback';
   routeType?: RouteType;
+  mobilityFlow?: string[];
+  mobilitySegments?: MobilitySegment[];
   busRouteId?: string;
   busStationId?: string;
   estimatedTravelMinutes: number;
-  delayRisk: number; // 0 ~ 1
+  realtimeAdjustedDurationMinutes?: number;
+  delayRisk: number;
+  delayRiskLevel?: DelayRiskLevel;
   transferCount: number;
   walkingMinutes: number;
+  confidenceScore?: number;
+  score?: number;
+  realtimeCoverage?: number;
+  mapOverlay?: KakaoMapOverlay;
 }
+
+export type MobilityRoute = RouteCandidate;
 
 export interface UserPreference {
   prepMinutes: number;
@@ -63,7 +133,7 @@ export interface ScoredRoute {
 export interface RecommendationSelectionContext {
   cacheHitCount: number;
   cacheTotalCount: number;
-  dataFreshnessScore: number; // 0 ~ 1
+  dataFreshnessScore: number;
 }
 
 export interface RecommendationResult {
@@ -73,4 +143,26 @@ export interface RecommendationResult {
   nextAction: string;
   confidenceScore: number;
   generatedAt: string;
+  allLate?: boolean;
+  walkOnly?: boolean;
+  walkMinutes?: number;
+  distanceMeters?: number;
+  routes?: RouteCandidate[];
+  origin?: { name: string; lat: number; lng: number };
+  destination?: { name: string; lat: number; lng: number };
 }
+
+export interface RecommendationEmptyState {
+  code: 'ROUTE_NO_RESULT' | 'ROUTE_EMPTY_AFTER_MAPPING' | 'ROUTE_INVALID_INPUT';
+  title: string;
+  description: string;
+  retryable: boolean;
+}
+
+export interface RecommendationEmptyResult {
+  routes: RouteCandidate[];
+  emptyState: RecommendationEmptyState;
+  diagnostics?: RouteDiagnostics;
+}
+
+export type RecommendationResponse = RecommendationResult | RecommendationEmptyResult;

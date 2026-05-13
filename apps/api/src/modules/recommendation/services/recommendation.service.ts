@@ -1,4 +1,8 @@
-import { Injectable } from '@nestjs/common';
+import {
+  Injectable,
+  GatewayTimeoutException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { MemoryTtlCacheService } from '../../../common/cache/memory-ttl-cache.service';
 import { SafeLogger } from '../../../common/logger/safe-logger.service';
 import { calculateRouteScore } from '../../../domain/recommendation/route-score.calculator';
@@ -10,7 +14,11 @@ import { SeoulSubwayClient } from '../integrations/seoul-subway.client';
 import { TrafficClient } from '../integrations/traffic.client';
 import { WeatherClient } from '../integrations/weather.client';
 import { RecommendationRequestDto } from '../dto/recommendation-request.dto';
+import type { RouteDiagnostics } from '../dto/integration/normalized-route.dto';
+import { OdsayTooCloseError } from './transit/OdsayTransitClient';
 import {
+  type RecommendationEmptyResult,
+  type RecommendationResponse,
   type RecommendationResult,
   type RecommendationSelectionContext,
   type LocationInput,
@@ -37,7 +45,17 @@ export class RecommendationService {
     private readonly weatherClient: WeatherClient,
   ) {}
 
-  async recommend(input: RecommendationRequestDto): Promise<RecommendationResult> {
+  async recommend(input: RecommendationRequestDto): Promise<RecommendationResponse> {
+    this.logger.log(
+      {
+        event: 'recommendation.request.received',
+        candidateRoutesCount: input.candidateRoutes?.length ?? 0,
+        origin: input.origin,
+        destination: input.destination,
+      },
+      RecommendationService.name,
+    );
+
     const arrivalAt = new Date(input.arrivalAt);
 
     const preference: UserPreference = {
@@ -47,11 +65,78 @@ export class RecommendationService {
       walkingPenaltyWeight: input.userPreference?.walkingPenaltyWeight ?? 1,
     };
 
-    const routeResult = await this.getRouteCandidatesCached(
-      input.origin,
-      input.destination,
-      input.candidateRoutes,
-    );
+    const requestId = `${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
+    let routeResult: Awaited<ReturnType<RecommendationService['getRouteCandidatesCached']>>;
+    try {
+      routeResult = await this.getRouteCandidatesCached(
+        input.origin,
+        input.destination,
+        input.candidateRoutes,
+      );
+    } catch (error) {
+      if (error instanceof OdsayTooCloseError) {
+        return this.buildWalkOnlyRoute(input.origin, input.destination, requestId);
+      }
+      throw error;
+    }
+    if (routeResult.status === 'NO_RESULT' || routeResult.status === 'MAPPING_FAILED') {
+      const emptyState = routeResult.emptyState ?? {
+        code: 'ROUTE_NO_RESULT',
+        title: '추천 가능한 경로가 없습니다',
+        description: '출발지와 도착지를 다시 확인하거나 도착 시간을 조정해 주세요.',
+        retryable: true,
+      };
+
+      const result: RecommendationEmptyResult = {
+        routes: [],
+        emptyState,
+        diagnostics: routeResult.diagnostics,
+      };
+      return result;
+    }
+
+    if (routeResult.status === 'PROVIDER_TIMEOUT') {
+      throw new GatewayTimeoutException({
+        code: 'ROUTE_PROVIDER_TIMEOUT',
+        message: '실시간 경로 조회 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.',
+      });
+    }
+
+    if (routeResult.status === 'PROVIDER_DOWN') {
+      const result: RecommendationEmptyResult = {
+        routes: [],
+        emptyState: {
+          code: 'ROUTE_NO_RESULT',
+          title: '경로 제공 설정이 필요합니다',
+          description: '경로 공급자 설정이 없어 실시간 경로를 계산할 수 없습니다.',
+          retryable: false,
+        },
+        diagnostics: routeResult.diagnostics,
+      };
+      return result;
+    }
+
+    if (routeResult.status === 'INVALID_INPUT') {
+      throw new UnprocessableEntityException({
+        code: 'ROUTE_INVALID_INPUT',
+        message: '경로 검색 입력값을 확인해 주세요.',
+        details: routeResult.emptyState,
+      });
+    }
+
+    if (routeResult.value.length === 0) {
+      const result: RecommendationEmptyResult = {
+        routes: [],
+        emptyState: {
+          code: 'ROUTE_EMPTY_AFTER_MAPPING',
+          title: '추천 가능한 경로가 없습니다',
+          description: '경로를 해석할 수 없어 다시 시도해 주세요.',
+          retryable: true,
+        },
+        diagnostics: routeResult.diagnostics,
+      };
+      return result;
+    }
     const roadResult = await this.getTrafficCongestionCached(input.origin, input.destination);
     const weatherResult = await this.getWeatherSeverityCached(input.origin, input.destination);
     const routeBusDelayRisks = await this.getBusDelayRiskByRoute(input.origin, routeResult.value);
@@ -119,7 +204,7 @@ export class RecommendationService {
       RecommendationService.name,
     );
 
-    const scored = candidates.map((route) => {
+    const scored: ScoredRoute[] = candidates.map((route) => {
       const routeBusDelayRisk =
         routeBusDelayRisks.find((item) => item.routeId === route.id)?.busDelayRisk ?? avgBusDelayRisk;
       const base = calculateRouteScore({
@@ -145,9 +230,220 @@ export class RecommendationService {
       dataFreshnessScore: (routeResult.freshness + roadResult.freshness + weatherResult.freshness) / 3,
     };
 
-    const recommendation = this.selectWithApiPrimary(scored, selectionContext);
-    this.logScoringDiagnostics(scored, recommendation);
+    const apiScored = scored.filter((route) => route.route.source === 'api');
+    let scoredForSelection = scored;
+    let realtimePreferred = apiScored.length > 0 ? apiScored : scored;
+    if (apiScored.length === 0) {
+      this.logger.warn(
+        {
+          event: 'recommendation.routes.realtime.unavailable',
+          reason: 'all_routes_fallback',
+          fallbackRouteCount: scored.length,
+        },
+        RecommendationService.name,
+      );
+    }
+
+    const allLate = realtimePreferred.length > 0 && realtimePreferred.every((route) => route.bufferMinutes < 0);
+    if (allLate) {
+      const normalizedRealtimePreferred = this.normalizeAllLateScores(realtimePreferred);
+      const normalizedByRouteId = new Map(
+        normalizedRealtimePreferred.map((route) => [route.route.id, route] as const),
+      );
+      scoredForSelection = scored.map((route) => normalizedByRouteId.get(route.route.id) ?? route);
+      realtimePreferred =
+        apiScored.length > 0
+          ? scoredForSelection.filter((route) => route.route.source === 'api')
+          : scoredForSelection;
+      this.logger.log(
+        {
+          event: 'recommendation.scoring.all_late_normalized',
+          routeCount: normalizedRealtimePreferred.length,
+          buffers: normalizedRealtimePreferred.map((route) => ({
+            routeId: route.route.id,
+            bufferMinutes: route.bufferMinutes,
+            totalScore: route.totalScore,
+          })),
+        },
+        RecommendationService.name,
+      );
+    }
+
+    const feasibleScored = realtimePreferred.filter((route) => route.bufferMinutes >= 0);
+    const selectable = feasibleScored.length > 0 ? feasibleScored : realtimePreferred;
+    if (feasibleScored.length === 0) {
+      this.logger.warn(
+        {
+          event: 'recommendation.routes.feasible.none',
+          reason: 'no_on_time_route',
+          consideredRouteCount: realtimePreferred.length,
+          statuses: realtimePreferred.map((route) => ({
+            routeId: route.route.id,
+            source: route.route.source,
+            status: route.status,
+            bufferMinutes: route.bufferMinutes,
+          })),
+        },
+        RecommendationService.name,
+      );
+    }
+
+    const recommendation = this.selectWithApiPrimary(selectable, selectionContext);
+    if (allLate) {
+      recommendation.allLate = true;
+    }
+    this.logRealtimeSegmentReasons(recommendation);
+    this.logScoringDiagnostics(scoredForSelection, recommendation);
     return recommendation;
+  }
+
+  private buildWalkOnlyRoute(
+    origin: { name: string; lat: number; lng: number },
+    destination: { name: string; lat: number; lng: number },
+    requestId: string,
+  ): RecommendationResult {
+    const distanceMeters = this.haversineDistance(
+      { latitude: origin.lat, longitude: origin.lng },
+      { latitude: destination.lat, longitude: destination.lng },
+    );
+    const roundedDistanceMeters = Math.round(distanceMeters);
+    const walkMinutes = Math.max(1, Math.ceil(distanceMeters / 67));
+    const now = new Date();
+    const generatedAt = now.toISOString();
+
+    this.logger.log(
+      {
+        requestId,
+        event: 'recommendation.walk_only_fallback',
+        reason: 'odsay_too_close',
+        distanceMeters: roundedDistanceMeters,
+        walkMinutes,
+      },
+      RecommendationService.name,
+    );
+
+    const status = this.resolveWalkOnlyStatus(walkMinutes);
+    const route: RouteCandidate = {
+      id: `walk-only-${requestId}`,
+      name: '도보 이동',
+      source: 'fallback',
+      routeType: 'walking-heavy',
+      mobilityFlow: ['walk'],
+      mobilitySegments: [
+        {
+          mode: 'walk',
+          durationMinutes: walkMinutes,
+          distanceMeters: roundedDistanceMeters,
+          startName: origin.name,
+          endName: destination.name,
+          startLat: origin.lat,
+          startLng: origin.lng,
+          endLat: destination.lat,
+          endLng: destination.lng,
+        },
+      ],
+      estimatedTravelMinutes: walkMinutes,
+      realtimeAdjustedDurationMinutes: walkMinutes,
+      delayRisk: 0.05,
+      transferCount: 0,
+      walkingMinutes: walkMinutes,
+    };
+
+    const primaryRoute: ScoredRoute = {
+      route,
+      departureAt: now.toISOString(),
+      expectedArrivalAt: new Date(now.getTime() + walkMinutes * 60_000).toISOString(),
+      bufferMinutes: walkMinutes,
+      status,
+      scoreBreakdown: {
+        punctuality: 100,
+        safety: 100,
+        earlyArrivalPenalty: 0,
+        transferPenalty: 0,
+        walkingPenalty: 0,
+        delayPenalty: 0,
+        bufferPenalty: 0,
+      },
+      totalScore: 100,
+      riskLevel: 'low',
+    };
+
+    return {
+      primaryRoute,
+      alternatives: [],
+      status,
+      nextAction: '도보로 이동하세요.',
+      confidenceScore: 1,
+      generatedAt,
+      walkOnly: true,
+      walkMinutes,
+      distanceMeters: roundedDistanceMeters,
+      origin,
+      destination,
+      routes: [],
+    };
+  }
+
+  private logRealtimeSegmentReasons(recommendation: RecommendationResult) {
+    const routes = [recommendation.primaryRoute, ...recommendation.alternatives];
+    const segments = routes.flatMap((item) =>
+      (item.route.mobilitySegments ?? []).map((segment, index) => ({
+        routeId: item.route.id,
+        index,
+        mode: segment.mode,
+        lineLabel: segment.lineLabel ?? null,
+        startName: segment.startName ?? null,
+        endName: segment.endName ?? null,
+        startStationId: segment.startStationId ?? null,
+        endStationId: segment.endStationId ?? null,
+        startArsId: segment.startArsId ?? null,
+        endArsId: segment.endArsId ?? null,
+        startLat: segment.startLat ?? null,
+        startLng: segment.startLng ?? null,
+        endLat: segment.endLat ?? null,
+        endLng: segment.endLng ?? null,
+        busRouteId: segment.busRouteId ?? null,
+        realtimeStatus: segment.realtimeStatus ?? 'SCHEDULED',
+        etaMinutes: segment.realtimeInfo?.etaMinutes ?? null,
+        reasonCode: segment.realtimeInfo?.reasonCode ?? null,
+        source: segment.realtimeInfo?.source ?? null,
+        updatedAt: segment.realtimeInfo?.updatedAt ?? null,
+        debug: segment.realtimeInfo?.debug ?? null,
+      })),
+    );
+    const busResolved = segments
+      .filter((segment) => segment.mode === 'bus')
+      .map((segment) => ({
+        routeId: segment.routeId,
+        index: segment.index,
+        lineLabel: segment.lineLabel,
+        startArsId: segment.startArsId,
+        startStationId: segment.startStationId,
+        busRouteId: segment.busRouteId,
+        realtimeStatus: segment.realtimeStatus,
+        reasonCode: segment.reasonCode,
+        source: segment.source,
+        etaMinutes: segment.etaMinutes,
+        updatedAt: segment.updatedAt,
+        debug: segment.debug,
+      }));
+
+    this.logger.log(
+      {
+        event: 'recommendation.realtime.segment_reasons',
+        segmentCount: segments.length,
+        segments,
+      },
+      RecommendationService.name,
+    );
+    this.logger.log(
+      {
+        event: 'recommendation.bus_realtime.resolved',
+        busSegmentCount: busResolved.length,
+        busSegments: busResolved,
+      },
+      RecommendationService.name,
+    );
   }
 
   private async getBusDelayRiskByRoute(
@@ -267,7 +563,10 @@ export class RecommendationService {
     }
 
     try {
-      const arrival = await this.seoulSubwayClient.getSubwayArrival(stationName);
+      const lineLabel = stationName.match(
+        /(1호선|2호선|3호선|4호선|5호선|6호선|7호선|8호선|9호선|신분당선|수인분당선|경의중앙선|공항철도|경춘선|경강선|우이신설선|신림선|서해선|GTX-A|GTX-B|GTX-C)/i,
+      )?.[1];
+      const arrival = await this.seoulSubwayClient.getSubwayArrival(stationName, lineLabel);
       return this.clamp01(arrival.delayRisk);
     } catch {
       return 0.1;
@@ -338,12 +637,78 @@ export class RecommendationService {
     return { bus: 0.35, subway: 0.25, road: 0.25, weather: 0.15 };
   }
 
+  private resolveWalkOnlyStatus(walkMinutes: number): '여유' | '주의' | '긴급' | '위험' {
+    if (walkMinutes <= 15) {
+      return '여유';
+    }
+    if (walkMinutes <= 25) {
+      return '주의';
+    }
+    if (walkMinutes <= 40) {
+      return '긴급';
+    }
+    return '위험';
+  }
+
+  private haversineDistance(
+    a: { latitude: number; longitude: number },
+    b: { latitude: number; longitude: number },
+  ): number {
+    const R = 6371000;
+    const dLat = ((b.latitude - a.latitude) * Math.PI) / 180;
+    const dLng = ((b.longitude - a.longitude) * Math.PI) / 180;
+    const x =
+      Math.sin(dLat / 2) ** 2 +
+      Math.cos((a.latitude * Math.PI) / 180) *
+        Math.cos((b.latitude * Math.PI) / 180) *
+        Math.sin(dLng / 2) ** 2;
+
+    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+  }
+
   private async getRouteCandidatesCached(
     origin: LocationInput,
     destination: LocationInput,
     routes?: RouteInputWithOptionalSource[],
-  ): Promise<{ value: RouteCandidate[]; cacheHit: boolean; freshness: number }> {
-    if (routes && routes.length >= 3) {
+  ): Promise<{
+    value: RouteCandidate[];
+    cacheHit: boolean;
+    freshness: number;
+    status: 'OK' | 'NO_RESULT' | 'MAPPING_FAILED' | 'PROVIDER_TIMEOUT' | 'PROVIDER_DOWN' | 'INVALID_INPUT';
+    emptyState?: {
+      code: 'ROUTE_NO_RESULT' | 'ROUTE_EMPTY_AFTER_MAPPING' | 'ROUTE_INVALID_INPUT';
+      title: string;
+      description: string;
+      retryable: boolean;
+    };
+    diagnostics?: RouteDiagnostics;
+  }> {
+    const hasBrokenBusLookupFields = (inputRoutes: RouteInputWithOptionalSource[]) =>
+      inputRoutes.some((route) =>
+        (route.mobilitySegments ?? []).some((segment) => {
+          if (segment.mode !== 'bus') {
+            return false;
+          }
+          const hasLookupField =
+            Boolean(segment.startArsId?.trim()) ||
+            Boolean(segment.startStationId?.trim()) ||
+            Boolean(segment.startName?.trim()) ||
+            Boolean(segment.busRouteId?.trim());
+          return !hasLookupField;
+        }),
+      );
+
+    if (routes && routes.length > 0) {
+      if (hasBrokenBusLookupFields(routes)) {
+        this.logger.warn(
+          {
+            event: 'recommendation.routes.input.discarded',
+            reason: 'BUS_SEGMENT_LOOKUP_FIELDS_MISSING',
+            routeCount: routes.length,
+          },
+          RecommendationService.name,
+        );
+      } else {
       return {
         value: routes.map((route) => ({
           ...route,
@@ -351,21 +716,48 @@ export class RecommendationService {
         })),
         cacheHit: false,
         freshness: 1,
+        status: 'OK',
       };
+      }
     }
 
     const key = `route:${origin.lat},${origin.lng}:${destination.lat},${destination.lng}`;
     const fromMemory = this.memoryTtlCacheService.get<RouteCandidate[]>(key);
     if (fromMemory) {
-      return { value: fromMemory, cacheHit: true, freshness: 0.9 };
+      return { value: fromMemory, cacheHit: true, freshness: 0.9, status: 'OK' };
     }
 
     const normalized = await this.kakaoMapClient.getRouteCandidates(origin, destination);
+    if (normalized.status !== 'OK') {
+      return {
+        value: normalized.candidates,
+        cacheHit: false,
+        freshness: 0.1,
+        status: normalized.status,
+        emptyState: normalized.emptyState,
+        diagnostics: normalized.diagnostics,
+      };
+    }
+
+    if (normalized.source !== 'api') {
+      this.logger.warn(
+        {
+          event: 'recommendation.routes.realtime.fallback',
+          cacheKey: key,
+          reason: 'route_provider_unavailable',
+          fallbackCount: normalized.candidates.length,
+        },
+        RecommendationService.name,
+      );
+    }
+
     this.memoryTtlCacheService.set(key, normalized.candidates, normalized.cacheableForMs);
     return {
       value: normalized.candidates,
       cacheHit: false,
-      freshness: normalized.source === 'api' ? 0.85 : 0.6,
+      freshness: normalized.source === 'api' ? 0.85 : 0.35,
+      status: 'OK',
+      diagnostics: normalized.diagnostics,
     };
   }
 
@@ -432,18 +824,12 @@ export class RecommendationService {
     scored: ScoredRoute[],
     context: RecommendationSelectionContext,
   ): RecommendationResult {
-    const apiRoutes = scored.filter((route) => route.route.source === 'api');
-
-    if (apiRoutes.length === 0) {
-      return selectRecommendation(scored, context);
-    }
-
-    const primaryFromApi = this.sortScoredRoutes(apiRoutes)[0];
+    const primaryFromApi = this.sortScoredRoutes(scored)[0];
     const alternatives = this.sortScoredRoutes(
       scored.filter((route) => route.route.id !== primaryFromApi.route.id),
-    ).slice(0, 3);
+    );
 
-    const base = selectRecommendation(apiRoutes, context);
+    const base = selectRecommendation(scored, context);
 
     return {
       primaryRoute: primaryFromApi,
@@ -457,12 +843,61 @@ export class RecommendationService {
 
   private sortScoredRoutes(routes: ScoredRoute[]): ScoredRoute[] {
     return [...routes].sort((a, b) => {
+      const scoreDiff = b.totalScore - a.totalScore;
+      if (Math.abs(scoreDiff) > 6) {
+        return scoreDiff;
+      }
+
+      const travelA = this.getComparableTravelMinutes(a.route);
+      const travelB = this.getComparableTravelMinutes(b.route);
+      if (travelA !== travelB) {
+        return travelA - travelB;
+      }
+
+      if (a.route.walkingMinutes !== b.route.walkingMinutes) {
+        return a.route.walkingMinutes - b.route.walkingMinutes;
+      }
+
       if (b.totalScore !== a.totalScore) {
         return b.totalScore - a.totalScore;
       }
 
       return b.bufferMinutes - a.bufferMinutes;
     });
+  }
+
+  private normalizeAllLateScores(routes: ScoredRoute[]): ScoredRoute[] {
+    if (routes.length === 0) {
+      return routes;
+    }
+
+    const buffers = routes.map((route) => route.bufferMinutes);
+    const leastLateBuffer = Math.max(...buffers);
+    const mostLateBuffer = Math.min(...buffers);
+    const denominator = leastLateBuffer - mostLateBuffer;
+
+    return routes.map((route) => {
+      const normalizedBufferScore =
+        denominator === 0
+          ? 1
+          : (route.bufferMinutes - mostLateBuffer) / denominator;
+      const clampedNormalized = this.clamp01(normalizedBufferScore);
+      const relativeScore = Math.round(clampedNormalized * 100);
+      const relativeBufferPenalty = Math.round((1 - clampedNormalized) * 20);
+
+      return {
+        ...route,
+        totalScore: relativeScore,
+        scoreBreakdown: {
+          ...route.scoreBreakdown,
+          bufferPenalty: relativeBufferPenalty,
+        },
+      };
+    });
+  }
+
+  private getComparableTravelMinutes(route: RouteCandidate): number {
+    return route.realtimeAdjustedDurationMinutes ?? route.estimatedTravelMinutes;
   }
 
   private logScoringDiagnostics(scored: ScoredRoute[], recommendation: RecommendationResult) {
@@ -476,6 +911,7 @@ export class RecommendationService {
       source: item.route.source,
       totalScore: item.totalScore,
       delayRisk: Number(item.route.delayRisk.toFixed(3)),
+      realtimeAdjustedDurationMinutes: this.getComparableTravelMinutes(item.route),
       estimatedTravelMinutes: item.route.estimatedTravelMinutes,
       transferCount: item.route.transferCount,
       walkingMinutes: item.route.walkingMinutes,
@@ -493,12 +929,19 @@ export class RecommendationService {
     }));
 
     const topOverall = sorted[0];
+    const topByScoreOnly = [...scored].sort((a, b) => b.totalScore - a.totalScore)[0];
     const hasApiRoute = scored.some((item) => item.route.source === 'api');
 
     let primaryReason = 'highest totalScore and buffer among comparable candidates';
     if (primary.route.source === 'api' && topOverall.route.id !== primary.route.id) {
       primaryReason =
         'API-primary policy applied: fallback route had higher score but API route exists';
+    } else if (
+      primary.route.source === 'api' &&
+      topByScoreOnly &&
+      topByScoreOnly.route.id !== primary.route.id
+    ) {
+      primaryReason = 'selected by travel-time-first tie-break (score gap threshold applied)';
     } else if (primary.route.source === 'api' && hasApiRoute) {
       primaryReason = 'selected by highest score within API-sourced candidates';
     } else if (primary.route.source === 'fallback') {
@@ -522,7 +965,8 @@ export class RecommendationService {
         return false;
       }
 
-      const minutesGap = primary.route.estimatedTravelMinutes - item.route.estimatedTravelMinutes;
+      const minutesGap =
+        this.getComparableTravelMinutes(primary.route) - this.getComparableTravelMinutes(item.route);
       const scoreGap = primary.totalScore - item.totalScore;
       const bufferGap = primary.bufferMinutes - item.bufferMinutes;
       return minutesGap >= 3 && scoreGap <= 15 && bufferGap <= 5;
@@ -532,7 +976,9 @@ export class RecommendationService {
         code: 'FASTER_ROUTE_NOT_SELECTED',
         detail: fasterNotSelected
           .map((item) => {
-            const minutesGap = primary.route.estimatedTravelMinutes - item.route.estimatedTravelMinutes;
+            const minutesGap =
+              this.getComparableTravelMinutes(primary.route) -
+              this.getComparableTravelMinutes(item.route);
             const scoreGap = primary.totalScore - item.totalScore;
             return `${item.route.id}(faster=${minutesGap}m,scoreGap=${scoreGap})`;
           })
@@ -654,6 +1100,7 @@ export class RecommendationService {
         routeSnapshot: sorted.map((item) => ({
           routeId: item.route.id,
           totalScore: item.totalScore,
+          realtimeAdjustedDurationMinutes: this.getComparableTravelMinutes(item.route),
           estimatedTravelMinutes: item.route.estimatedTravelMinutes,
           delayRisk: Number(item.route.delayRisk.toFixed(3)),
           walkingMinutes: item.route.walkingMinutes,

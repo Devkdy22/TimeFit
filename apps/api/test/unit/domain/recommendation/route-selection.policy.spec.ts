@@ -1,16 +1,22 @@
 import { selectRecommendation } from '../../../../src/domain/recommendation/route-selection.policy';
 import type { ScoredRoute } from '../../../../src/modules/recommendation/types/recommendation.types';
 
-function makeRoute(id: string, score: number, bufferMinutes: number): ScoredRoute {
+function makeRoute(
+  id: string,
+  score: number,
+  bufferMinutes: number,
+  estimatedTravelMinutes = 30,
+  walkingMinutes = 5,
+): ScoredRoute {
   return {
     route: {
       id,
       name: id,
       source: 'api',
-      estimatedTravelMinutes: 30,
+      estimatedTravelMinutes,
       delayRisk: 0.2,
       transferCount: 1,
-      walkingMinutes: 5,
+      walkingMinutes,
     },
     departureAt: '2026-04-07T08:00:00.000Z',
     expectedArrivalAt: '2026-04-07T08:50:00.000Z',
@@ -46,5 +52,14 @@ describe('selectRecommendation', () => {
     expect(result.primaryRoute.route.id).toBe('r1');
     expect(result.alternatives).toHaveLength(3);
     expect(result.confidenceScore).toBeGreaterThanOrEqual(35);
+  });
+
+  it('prefers faster route when score gap is small', () => {
+    const result = selectRecommendation([
+      makeRoute('slow-high-score', 51, 86, 18, 9),
+      makeRoute('fast-close-score', 48, 89, 15, 7),
+    ]);
+
+    expect(result.primaryRoute.route.id).toBe('fast-close-score');
   });
 });

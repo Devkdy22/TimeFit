@@ -12,13 +12,7 @@ export function selectRecommendation(
     throw new Error('No scored routes to select from');
   }
 
-  const sorted = [...scoredRoutes].sort((a, b) => {
-    if (b.totalScore !== a.totalScore) {
-      return b.totalScore - a.totalScore;
-    }
-
-    return b.bufferMinutes - a.bufferMinutes;
-  });
+  const sorted = [...scoredRoutes].sort(compareScoredRoute);
 
   const primaryRoute = sorted[0];
   const alternatives = sorted.slice(1, 4);
@@ -61,6 +55,29 @@ export function selectRecommendation(
     confidenceScore,
     generatedAt,
   };
+}
+
+function compareScoredRoute(a: ScoredRoute, b: ScoredRoute): number {
+  const scoreDiff = b.totalScore - a.totalScore;
+  if (Math.abs(scoreDiff) > 6) {
+    return scoreDiff;
+  }
+
+  const travelA = a.route.realtimeAdjustedDurationMinutes ?? a.route.estimatedTravelMinutes;
+  const travelB = b.route.realtimeAdjustedDurationMinutes ?? b.route.estimatedTravelMinutes;
+  if (travelA !== travelB) {
+    return travelA - travelB;
+  }
+
+  if (a.route.walkingMinutes !== b.route.walkingMinutes) {
+    return a.route.walkingMinutes - b.route.walkingMinutes;
+  }
+
+  if (b.totalScore !== a.totalScore) {
+    return b.totalScore - a.totalScore;
+  }
+
+  return b.bufferMinutes - a.bufferMinutes;
 }
 
 function resolveNextActionByRemaining(remainingMinutes: number): string {

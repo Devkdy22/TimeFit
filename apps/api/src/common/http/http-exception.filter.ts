@@ -30,14 +30,28 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const errorPayload =
       exception instanceof HttpException ? exception.getResponse() : 'Internal server error';
 
-    const normalizedMessage =
-      typeof errorPayload === 'string' ? errorPayload : 'Request failed';
+    if (typeof errorPayload === 'object' && errorPayload) {
+      const payload = errorPayload as {
+        code?: string;
+        message?: string | string[];
+        details?: unknown;
+      };
+      const message = Array.isArray(payload.message)
+        ? payload.message.join(', ')
+        : payload.message ?? 'Request failed';
+      response.status(status).json(
+        ApiResponse.error(payload.code ?? 'HTTP_ERROR', message, {
+          path: request.url,
+          status,
+          details: payload.details,
+        }),
+      );
+      return;
+    }
 
-    response.status(status).json(
-      ApiResponse.error('HTTP_ERROR', normalizedMessage, {
-        path: request.url,
-        status,
-      }),
-    );
+    const normalizedMessage = typeof errorPayload === 'string' ? errorPayload : 'Request failed';
+    response
+      .status(status)
+      .json(ApiResponse.error('HTTP_ERROR', normalizedMessage, { path: request.url, status }));
   }
 }

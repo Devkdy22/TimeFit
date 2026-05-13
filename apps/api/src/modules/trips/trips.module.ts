@@ -1,27 +1,30 @@
 import { Module } from '@nestjs/common';
-import { AppConfigService } from '../../common/config/app-config.service';
 import { SafeLogger } from '../../common/logger/safe-logger.service';
 import { NotificationsModule } from '../notifications/notifications.module';
-import { SeoulBusClient } from '../recommendation/integrations/seoul-bus.client';
-import { SeoulSubwayClient } from '../recommendation/integrations/seoul-subway.client';
-import { TrafficClient } from '../recommendation/integrations/traffic.client';
-import { WeatherClient } from '../recommendation/integrations/weather.client';
+import { RecommendationModule } from '../recommendation/recommendation.module';
 import { TripsController } from './trips.controller';
 import { TripsRepository } from './services/trips.repository';
+import { MetricsCollector } from './services/tracking/MetricsCollector';
+import { MovementTracker } from './services/tracking/MovementTracker';
+import { OffRouteHandler } from './services/tracking/OffRouteHandler';
+import { PositionSmoother } from './services/tracking/PositionSmoother';
+import { TripLifecycleManager } from './services/TripLifecycleManager';
 import { TripsService } from './services/trips.service';
+import { TripPositionRateLimitGuard } from './guards/trip-position-rate-limit.guard';
 
 @Module({
-  imports: [NotificationsModule],
+  imports: [NotificationsModule, RecommendationModule],
   controllers: [TripsController],
   providers: [
     TripsRepository,
     TripsService,
-    AppConfigService,
     SafeLogger,
-    SeoulBusClient,
-    SeoulSubwayClient,
-    TrafficClient,
-    WeatherClient,
+    MovementTracker,
+    PositionSmoother,
+    OffRouteHandler,
+    MetricsCollector,
+    TripLifecycleManager,
+    TripPositionRateLimitGuard,
   ],
 })
 export class TripsModule {}

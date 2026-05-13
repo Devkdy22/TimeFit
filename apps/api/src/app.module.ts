@@ -14,6 +14,8 @@ import { OptionalRedisProvider } from './common/cache/redis.provider';
 import { SafeLogger } from './common/logger/safe-logger.service';
 import { AppConfigService } from './common/config/app-config.service';
 import type { AppEnv } from './common/config/env.schema';
+import { CoreModule } from './core/core.module';
+import { RealtimeModule } from './modules/realtime/realtime.module';
 
 @Module({
   imports: [
@@ -21,6 +23,7 @@ import type { AppEnv } from './common/config/env.schema';
       isGlobal: true,
       validate: validateEnv,
     }),
+    CoreModule,
     ThrottlerModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (configService: ConfigService<AppEnv, true>) => [getRateLimitConfig(configService)],
@@ -30,6 +33,7 @@ import type { AppEnv } from './common/config/env.schema';
     KakaoLocalModule,
     TripsModule,
     RoutinesModule,
+    RealtimeModule,
   ],
   controllers: [HealthController],
   providers: [

@@ -69,6 +69,7 @@ export class KakaoLocalController {
     @Query('lat') latText: string,
     @Query('lng') lngText: string,
     @Query('radius') radiusText?: string,
+    @Query('selectedName') selectedName?: string,
   ): Promise<{
     success: true;
     data: NearbyPoiResponse;
@@ -83,7 +84,7 @@ export class KakaoLocalController {
       throw new BadRequestException('lat and lng must be valid numbers');
     }
 
-    const data = await this.locationService.getNearbyPoi(lat, lng, radius);
+    const data = await this.locationService.getNearbyPoi(lat, lng, radius, selectedName);
     return ApiResponse.ok(data);
   }
 }

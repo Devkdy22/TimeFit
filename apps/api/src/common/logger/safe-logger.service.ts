@@ -1,23 +1,24 @@
 import { ConsoleLogger, Injectable } from '@nestjs/common';
+import { getRequestLogContext } from './request-context';
 
 const SENSITIVE_KEYS = ['password', 'token', 'authorization', 'cookie', 'apikey', 'secret'];
 
 @Injectable()
 export class SafeLogger extends ConsoleLogger {
   override log(message: unknown, context?: string) {
-    super.log(this.mask(message), context);
+    super.log(this.enrich(this.mask(message)), context);
   }
 
   override error(message: unknown, trace?: string, context?: string) {
-    super.error(this.mask(message), trace, context);
+    super.error(this.enrich(this.mask(message)), trace, context);
   }
 
   override warn(message: unknown, context?: string) {
-    super.warn(this.mask(message), context);
+    super.warn(this.enrich(this.mask(message)), context);
   }
 
   override debug(message: unknown, context?: string) {
-    super.debug(this.mask(message), context);
+    super.debug(this.enrich(this.mask(message)), context);
   }
 
   private mask(payload: unknown): unknown {
@@ -34,5 +35,23 @@ export class SafeLogger extends ConsoleLogger {
     }
 
     return json;
+  }
+
+  private enrich(payload: unknown): unknown {
+    if (!payload || typeof payload !== 'object') {
+      return payload;
+    }
+
+    const context = getRequestLogContext();
+    if (!context) {
+      return payload;
+    }
+
+    return {
+      requestId: context.requestId,
+      tripId: context.tripId,
+      routeId: context.routeId,
+      ...(payload as Record<string, unknown>),
+    };
   }
 }

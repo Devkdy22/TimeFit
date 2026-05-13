@@ -13,6 +13,59 @@ export interface NearbyPoiResponse {
   candidates: PoiCandidate[];
 }
 
+export type PoiSelectionTier = 1 | 2 | 3 | 4;
+
+interface BestPoiSelection {
+  selectedPoi: PoiCandidate;
+  selectionTier: PoiSelectionTier;
+}
+
+function normalizeName(value: string): string {
+  return value.replace(/\s+/g, '').replace(/[^\w가-힣]/g, '').toLowerCase();
+}
+
+export function selectBestPoi(candidates: PoiCandidate[], userSelectedName?: string): BestPoiSelection {
+  if (candidates.length === 0) {
+    throw new Error('candidates가 비어있습니다');
+  }
+
+  const normalizedTarget = normalizeName(userSelectedName ?? '');
+
+  if (normalizedTarget.length > 0) {
+    const nameMatch = candidates.find((candidate) => {
+      const normalizedName = normalizeName(candidate.name);
+      return normalizedName.includes(normalizedTarget) || normalizedTarget.includes(normalizedName);
+    });
+    if (nameMatch) {
+      return { selectedPoi: nameMatch, selectionTier: 1 };
+    }
+  }
+
+  const keywordExact = candidates.find(
+    (candidate) => candidate.source === 'keyword' && Number.isFinite(candidate.distance) && candidate.distance === 0,
+  );
+  if (keywordExact) {
+    return { selectedPoi: keywordExact, selectionTier: 2 };
+  }
+
+  const keyword = candidates.find((candidate) => candidate.source === 'keyword');
+  if (keyword) {
+    return { selectedPoi: keyword, selectionTier: 3 };
+  }
+
+  const fallback = [...candidates].sort((a, b) => {
+    if (b.score !== a.score) {
+      return b.score - a.score;
+    }
+    return a.distance - b.distance;
+  })[0];
+
+  return {
+    selectedPoi: fallback,
+    selectionTier: 4,
+  };
+}
+
 @Injectable()
 export class LocationService {
   private readonly categoryCodes = ['FD6', 'CE7', 'AT4', 'OL7', 'SW8'];
@@ -64,7 +117,12 @@ export class LocationService {
     return null;
   }
 
-  async getNearbyPoi(lat: number, lng: number, maxRadius = 300): Promise<NearbyPoiResponse> {
+  async getNearbyPoi(
+    lat: number,
+    lng: number,
+    maxRadius = 300,
+    userSelectedName?: string,
+  ): Promise<NearbyPoiResponse> {
     const effectiveRadius = Math.max(200, Math.min(250, Math.floor(maxRadius)));
 
     const coordTask = this.getCoordAddressWithRetry(lat, lng);
@@ -108,15 +166,6 @@ export class LocationService {
       .reduce((sum, item) => sum + item.value.documents.length, 0);
 
     const rawCandidates: Array<Omit<PoiCandidate, 'score'>> = [];
-    const categoryPriorityCandidates: Array<{
-      name: string;
-      distance: number;
-      hasPlaceName: boolean;
-      lat: number;
-      lng: number;
-      category?: string;
-    }> = [];
-
     categoryResult.forEach((item) => {
       if (item.status !== 'fulfilled') {
         return;
@@ -131,15 +180,6 @@ export class LocationService {
         const distance = this.toNumericDistance(doc.distance);
         const candLat = Number(doc.y) || lat;
         const candLng = Number(doc.x) || lng;
-
-        categoryPriorityCandidates.push({
-          name,
-          distance,
-          hasPlaceName: Boolean(placeName),
-          lat: candLat,
-          lng: candLng,
-          category: item.value.category || doc.category_group_code || undefined,
-        });
 
         rawCandidates.push({
           name,
@@ -195,37 +235,9 @@ export class LocationService {
     }
 
     const candidates = normalizeCandidates(rawCandidates);
-    const selectedCategory = categoryPriorityCandidates
-      .filter((candidate) => Number.isFinite(candidate.distance) && candidate.distance <= 300)
-      .sort((a, b) => {
-        if (a.hasPlaceName !== b.hasPlaceName) {
-          return a.hasPlaceName ? -1 : 1;
-        }
-        return a.distance - b.distance;
-      })[0];
-    const selectedOverall = candidates[0];
-    const selected = selectedCategory
-      ? {
-          name: selectedCategory.name,
-          source: 'category' as const,
-          score:
-            candidates.find(
-              (candidate) =>
-                candidate.source === 'category' &&
-                candidate.name === selectedCategory.name &&
-                candidate.distance === selectedCategory.distance,
-            )?.score ?? 0,
-          distance: selectedCategory.distance,
-        }
-      : selectedOverall
-        ? {
-            name: selectedOverall.name,
-            source: selectedOverall.source,
-            score: selectedOverall.score,
-            distance: selectedOverall.distance,
-          }
-        : null;
-    const fallbackUsed = !selected;
+    const selection = candidates.length > 0 ? selectBestPoi(candidates, userSelectedName) : null;
+    const selected = selection?.selectedPoi ?? null;
+    const fallbackUsed = !selection;
 
     const poiName = selected?.name || roadAddress || jibunAddress;
     const placeName = selected?.name || roadAddress || jibunAddress;
@@ -248,12 +260,13 @@ export class LocationService {
         })),
         selectedPoi: selected
           ? {
-              name: selected.name,
-              source: selected.source,
-              score: selected.score,
-              distance: selected.distance,
-            }
+            name: selected.name,
+            source: selected.source,
+            score: selected.score,
+            distance: selected.distance,
+          }
           : null,
+        selectionTier: selection?.selectionTier ?? null,
         fallbackUsed,
         finalName,
       },

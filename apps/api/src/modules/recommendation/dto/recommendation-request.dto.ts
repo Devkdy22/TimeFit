@@ -48,6 +48,17 @@ class CandidateRouteDto {
   @IsIn(['api', 'fallback'])
   source?: 'api' | 'fallback';
 
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  mobilityFlow?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => MobilitySegmentDto)
+  mobilitySegments?: MobilitySegmentDto[];
+
   @Type(() => Number)
   @IsNumber()
   @Min(1)
@@ -68,6 +79,46 @@ class CandidateRouteDto {
   @IsNumber()
   @Min(0)
   walkingMinutes!: number;
+}
+
+class MobilitySegmentDto {
+  @IsIn(['walk', 'bus', 'subway', 'car'])
+  mode!: 'walk' | 'bus' | 'subway' | 'car';
+
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  durationMinutes!: number;
+
+  @IsOptional()
+  @IsString()
+  lineLabel?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  startLat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  startLng?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  endLat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  endLng?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  distanceMeters?: number;
 }
 
 class UserPreferenceDto {

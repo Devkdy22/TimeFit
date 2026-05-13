@@ -1,9 +1,14 @@
 import { MemoryTtlCacheService } from '../../../../src/common/cache/memory-ttl-cache.service';
 import { SafeLogger } from '../../../../src/common/logger/safe-logger.service';
 import { RecommendationService } from '../../../../src/modules/recommendation/services/recommendation.service';
+import { OdsayTooCloseError } from '../../../../src/modules/recommendation/services/transit/OdsayTransitClient';
 import type { NormalizedRouteDto } from '../../../../src/modules/recommendation/dto/integration/normalized-route.dto';
 
 describe('RecommendationService', () => {
+  function futureIso(minutesFromNow: number) {
+    return new Date(Date.now() + minutesFromNow * 60_000).toISOString();
+  }
+
   function createService(routeResponse?: NormalizedRouteDto) {
     const memory = new MemoryTtlCacheService();
     const trafficSnapshotRepository = {
@@ -15,9 +20,10 @@ describe('RecommendationService', () => {
         .fn()
         .mockResolvedValue(
           routeResponse ?? {
-            source: 'fallback',
-            fetchedAt: '2026-04-07T00:00:00.000Z',
-            cacheableForMs: 45_000,
+              source: 'fallback',
+              status: 'OK',
+              fetchedAt: '2026-04-07T00:00:00.000Z',
+              cacheableForMs: 45_000,
             candidates: [
               {
                 id: 'fallback-1',
@@ -98,7 +104,14 @@ describe('RecommendationService', () => {
       weatherClient as never,
     );
 
-    return { service };
+    return {
+      service,
+      kakaoMapClient,
+      seoulBusClient,
+      seoulSubwayClient,
+      trafficClient,
+      weatherClient,
+    };
   }
 
   it('does not select fallback as primary when api routes exist', async () => {
@@ -107,7 +120,7 @@ describe('RecommendationService', () => {
     const result = await service.recommend({
       origin: { name: 'A', lat: 37.5, lng: 127.0 },
       destination: { name: 'B', lat: 37.6, lng: 127.1 },
-      arrivalAt: '2026-04-07T09:00:00.000Z',
+      arrivalAt: futureIso(80),
       candidateRoutes: [
         {
           id: 'api-low-1',
@@ -145,16 +158,19 @@ describe('RecommendationService', () => {
       },
     });
 
+    if (!('primaryRoute' in result)) {
+      throw new Error('Expected recommendation result with primaryRoute');
+    }
     expect(result.primaryRoute.route.source).toBe('api');
   });
 
-  it('allows fallback primary when api routes are unavailable', async () => {
+  it('returns fallback recommendation when realtime api routes are unavailable', async () => {
     const { service } = createService();
 
     const result = await service.recommend({
       origin: { name: 'A', lat: 37.5, lng: 127.0 },
       destination: { name: 'B', lat: 37.6, lng: 127.1 },
-      arrivalAt: '2026-04-07T09:00:00.000Z',
+      arrivalAt: futureIso(80),
       userPreference: {
         prepMinutes: 8,
         preferredBufferMinutes: 4,
@@ -163,6 +179,70 @@ describe('RecommendationService', () => {
       },
     });
 
+    if (!('primaryRoute' in result)) {
+      throw new Error('Expected recommendation result with primaryRoute');
+    }
     expect(result.primaryRoute.route.source).toBe('fallback');
+    expect(result.alternatives.length).toBeGreaterThan(0);
+  });
+
+  it('does not throw 503 when route status is NO_RESULT', async () => {
+    const { service } = createService({
+      source: 'api',
+      status: 'NO_RESULT',
+      fetchedAt: '2026-04-07T00:00:00.000Z',
+      cacheableForMs: 45_000,
+      candidates: [],
+      emptyState: {
+        code: 'ROUTE_NO_RESULT',
+        title: '추천 가능한 경로가 없습니다',
+        description: '출발지와 도착지를 다시 확인하거나 도착 시간을 조정해 주세요.',
+        retryable: true,
+      },
+    });
+
+    const result = await service.recommend({
+      origin: { name: 'A', lat: 37.5, lng: 127.0 },
+      destination: { name: 'B', lat: 37.6, lng: 127.1 },
+      arrivalAt: futureIso(80),
+      userPreference: {
+        prepMinutes: 8,
+        preferredBufferMinutes: 4,
+        transferPenaltyWeight: 1,
+        walkingPenaltyWeight: 1,
+      },
+    });
+
+    expect('emptyState' in result).toBe(true);
+  });
+
+  it('returns walk-only fallback when ODsay responds with too-close error', async () => {
+    const { service, kakaoMapClient } = createService();
+    kakaoMapClient.getRouteCandidates.mockRejectedValueOnce(
+      new OdsayTooCloseError('출, 도착지가 700m이내입니다.', {
+        origin: { name: 'A', lat: 37.5, lng: 127.0 },
+        destination: { name: 'B', lat: 37.5003, lng: 127.0005 },
+      }),
+    );
+
+    const result = await service.recommend({
+      origin: { name: 'A', lat: 37.5, lng: 127.0 },
+      destination: { name: 'B', lat: 37.5003, lng: 127.0005 },
+      arrivalAt: futureIso(20),
+      userPreference: {
+        prepMinutes: 8,
+        preferredBufferMinutes: 4,
+        transferPenaltyWeight: 1,
+        walkingPenaltyWeight: 1,
+      },
+    });
+
+    if (!('walkOnly' in result)) {
+      throw new Error('Expected walkOnly response');
+    }
+
+    expect(result.walkOnly).toBe(true);
+    expect(result.walkMinutes).toBeGreaterThan(0);
+    expect(result.routes).toEqual([]);
   });
 });

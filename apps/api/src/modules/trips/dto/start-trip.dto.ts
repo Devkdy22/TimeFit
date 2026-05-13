@@ -1,29 +1,59 @@
 import { Type } from 'class-transformer';
-import { IsISO8601, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsISO8601,
+  IsNumber,
+  IsObject,
+  IsOptional,
+  IsString,
+  Min,
+  ValidateNested,
+} from 'class-validator';
+import type { MobilityRoute } from '../../recommendation/types/recommendation.types';
+
+class CurrentPositionDto {
+  @Type(() => Number)
+  @IsNumber()
+  lat!: number;
+
+  @Type(() => Number)
+  @IsNumber()
+  lng!: number;
+}
 
 export class StartTripDto {
+  @IsOptional()
   @IsString()
-  userId!: string;
+  userId?: string;
 
+  @IsOptional()
   @IsString()
-  recommendationId!: string;
+  recommendationId?: string;
 
   @IsOptional()
   @IsString()
   currentRoute?: string;
 
   @IsOptional()
+  @IsObject()
+  route?: MobilityRoute;
+
+  @IsOptional()
   @IsISO8601()
   departureAt?: string;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(1)
-  plannedDurationMinutes!: number;
+  plannedDurationMinutes?: number;
 
   @IsOptional()
   @IsISO8601()
   arrivalAt?: string;
+
+  @IsOptional()
+  @IsISO8601()
+  targetArrivalTime?: string;
 
   @IsOptional()
   @IsISO8601()
@@ -56,4 +86,9 @@ export class StartTripDto {
   @IsOptional()
   @IsString()
   expoPushToken?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CurrentPositionDto)
+  currentPosition?: CurrentPositionDto;
 }

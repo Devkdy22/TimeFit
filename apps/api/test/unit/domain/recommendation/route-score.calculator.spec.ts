@@ -5,6 +5,10 @@ import type {
 } from '../../../../src/modules/recommendation/types/recommendation.types';
 
 describe('calculateRouteScore', () => {
+  function futureDate(minutesFromNow: number) {
+    return new Date(Date.now() + minutesFromNow * 60_000);
+  }
+
   const preference: UserPreference = {
     prepMinutes: 10,
     preferredBufferMinutes: 4,
@@ -23,12 +27,12 @@ describe('calculateRouteScore', () => {
   };
 
   it('calculates schedule state and score breakdown', () => {
-    const arrivalAt = new Date('2026-04-07T09:00:00.000Z');
+    const arrivalAt = futureDate(40);
 
     const result = calculateRouteScore({ route, arrivalAt, preference });
 
     expect(result.totalScore).toBeGreaterThan(0);
-    expect(result.status).toBe('긴급');
+    expect(result.status).toBe('위험');
     expect(result.scoreBreakdown.transferPenalty).toBe(6);
     expect(result.scoreBreakdown.walkingPenalty).toBe(3);
     expect(result.scoreBreakdown.delayPenalty).toBe(0);
@@ -41,7 +45,7 @@ describe('calculateRouteScore', () => {
       delayRisk: 0.8,
     };
 
-    const arrivalAt = new Date('2026-04-07T09:00:00.000Z');
+    const arrivalAt = futureDate(40);
 
     const result = calculateRouteScore({
       route: delayedRoute,
