@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: timefit-api
+    runtime: node
+    plan: free
+    rootDir: .
+    autoDeploy: false
+    buildCommand: corepack enable && corepack prepare pnpm@10.0.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @timefit/api... build
+    startCommand: corepack enable && corepack prepare pnpm@10.0.0 --activate && pnpm --filter @timefit/api start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"
+      - key: DATABASE_URL
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        generateValue: true
+      - key: JWT_REFRESH_SECRET
+        generateValue: true
+      - key: KAKAO_API_KEY
+        sync: false
+      - key: KAKAO_REST_API_KEY
+        sync: false
+      - key: WEATHER_API_KEY
+        sync: false
+      - key: SEOUL_API_KEY
+        sync: false
+      - key: SEOUL_SUBWAY_API_KEY
+        sync: false
+      - key: FCM_SERVER_KEY
+        sync: false
+      - key: ODSAY_API_KEY
+        sync: false
+      - key: EXPO_PUSH_API_URL
+        value: https://exp.host/--/api/v2/push/send
+      - key: ODSAY_API_URL
+        value: https://api.odsay.com/v1/api
+      - key: TRAFFIC_API_URL
+        value: ""
+      - key: WEATHER_API_URL
+        value: ""
+      - key: SEOUL_BUS_API_URL
+        value: ""
+      - key: SEOUL_SUBWAY_API_URL
+        value: ""
+      - key: CORS_ORIGINS
+        sync: false
+      - key: RATE_LIMIT_TTL_MS
+        value: "60000"
+      - key: RATE_LIMIT_MAX
+        value: "60"
+      - key: REDIS_URL
+        sync: false

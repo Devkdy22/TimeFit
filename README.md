@@ -21,6 +21,7 @@ pnpm dev:mobile
 ## Health Check
 ```bash
 curl http://localhost:3000/health
+curl https://timefit-api.onrender.com/health
 ```
 
 ## GitHub 연결 방법
