@@ -1,15 +1,14 @@
 import { Injectable } from '@nestjs/common';
-import { PrismaClient } from '@prisma/client';
 import type { OdsayUsageSnapshot } from '../types/transit';
 
 let dbUnavailableLogged = false;
 
 @Injectable()
 export class OdsayUsageRepository {
-  private prisma: PrismaClient | null = null;
+  private prisma: OdsayUsageDbClient | null = null;
 
   async increment(date: string, timezone: string, deltas: Partial<Record<keyof Omit<OdsayUsageSnapshot, 'date' | 'timezone'>, number>>) {
-    const prisma = this.getPrismaClient();
+    const prisma = await this.getPrismaClient();
     const payload = this.normalizeDeltas(deltas);
 
     try {
@@ -45,7 +44,7 @@ export class OdsayUsageRepository {
   }
 
   async findByDate(date: string): Promise<OdsayUsageSnapshot | null> {
-    const prisma = this.getPrismaClient();
+    const prisma = await this.getPrismaClient();
     const found = await prisma.odsayUsageDaily.findUnique({ where: { date } });
     if (!found) {
       return null;
@@ -76,13 +75,16 @@ export class OdsayUsageRepository {
     };
   }
 
-  private getPrismaClient(): PrismaClient {
+  private async getPrismaClient(): Promise<OdsayUsageDbClient> {
     if (this.prisma) {
       return this.prisma;
     }
 
-    const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
-    this.prisma = globalForPrisma.prisma ?? new PrismaClient();
+    const globalForPrisma = globalThis as unknown as { prisma?: OdsayUsageDbClient };
+    const prismaModule = (await import('@prisma/client')) as unknown as {
+      PrismaClient: new () => OdsayUsageDbClient;
+    };
+    this.prisma = globalForPrisma.prisma ?? new prismaModule.PrismaClient();
     if (!globalForPrisma.prisma) {
       globalForPrisma.prisma = this.prisma;
     }
@@ -122,3 +124,34 @@ export class OdsayUsageRepository {
     return 'unknown_error';
   }
 }
+
+type OdsayUsageDailyRecord = {
+  date: string;
+  timezone: string;
+  totalRequests: number;
+  externalApiCalls: number;
+  cacheHits: number;
+  staleFallbackHits: number;
+  deduplicatedRequests: number;
+  successResponses: number;
+  failedResponses: number;
+};
+
+type OdsayUsageDbClient = {
+  odsayUsageDaily: {
+    upsert(args: {
+      where: { date: string };
+      create: OdsayUsageDailyRecord;
+      update: {
+        totalRequests: { increment: number };
+        externalApiCalls: { increment: number };
+        cacheHits: { increment: number };
+        staleFallbackHits: { increment: number };
+        deduplicatedRequests: { increment: number };
+        successResponses: { increment: number };
+        failedResponses: { increment: number };
+      };
+    }): Promise<unknown>;
+    findUnique(args: { where: { date: string } }): Promise<OdsayUsageDailyRecord | null>;
+  };
+};
