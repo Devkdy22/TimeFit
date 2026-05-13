@@ -422,7 +422,7 @@ export function buildKakaoMapHtml({
               level: 3,
             });
 
-            var timiSvg = '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"24\" height=\"24\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"10\" fill=\"#58C7C2\" stroke=\"#FFFFFF\" stroke-width=\"3\"/></svg>';
+            var timiSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#58C7C2" stroke="#FFFFFF" stroke-width="3"/></svg>';
             var timiImage = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(timiSvg);
             var markerImage = null;
             if (kakao.maps.MarkerImage && kakao.maps.Size && kakao.maps.Point) {
@@ -647,7 +647,7 @@ export function buildKakaoMapHtml({
               }
 
               if (pins.origin && typeof pins.origin.lat === 'number' && typeof pins.origin.lng === 'number') {
-                var originSvg = '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"34\" height=\"42\" viewBox=\"0 0 34 42\"><path d=\"M17 1C8.7 1 2 7.7 2 16c0 11.1 12.2 22.1 14.1 23.8a1.4 1.4 0 0 0 1.8 0C19.8 38.1 32 27.1 32 16 32 7.7 25.3 1 17 1z\" fill=\"#3E88FF\" stroke=\"#2A63C9\" stroke-width=\"1.2\"/><circle cx=\"17\" cy=\"16\" r=\"6.2\" fill=\"#fff\"/><circle cx=\"17\" cy=\"16\" r=\"2.8\" fill=\"#3E88FF\"/></svg>';
+                var originSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="34" height="42" viewBox="0 0 34 42"><path d="M17 1C8.7 1 2 7.7 2 16c0 11.1 12.2 22.1 14.1 23.8a1.4 1.4 0 0 0 1.8 0C19.8 38.1 32 27.1 32 16 32 7.7 25.3 1 17 1z" fill="#3E88FF" stroke="#2A63C9" stroke-width="1.2"/><circle cx="17" cy="16" r="6.2" fill="#fff"/><circle cx="17" cy="16" r="2.8" fill="#3E88FF"/></svg>';
                 var originImage = null;
                 if (kakao.maps.MarkerImage && kakao.maps.Size && kakao.maps.Point) {
                   originImage = new kakao.maps.MarkerImage(
@@ -668,7 +668,7 @@ export function buildKakaoMapHtml({
                 typeof pins.destination.lat === 'number' &&
                 typeof pins.destination.lng === 'number'
               ) {
-                var destinationSvg = '<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"34\" height=\"42\" viewBox=\"0 0 34 42\"><path d=\"M17 1C8.7 1 2 7.7 2 16c0 11.1 12.2 22.1 14.1 23.8a1.4 1.4 0 0 0 1.8 0C19.8 38.1 32 27.1 32 16 32 7.7 25.3 1 17 1z\" fill=\"#EF4444\" stroke=\"#B91C1C\" stroke-width=\"1.2\"/><circle cx=\"17\" cy=\"16\" r=\"6.2\" fill=\"#fff\"/><circle cx=\"17\" cy=\"16\" r=\"2.8\" fill=\"#EF4444\"/></svg>';
+                var destinationSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="34" height="42" viewBox="0 0 34 42"><path d="M17 1C8.7 1 2 7.7 2 16c0 11.1 12.2 22.1 14.1 23.8a1.4 1.4 0 0 0 1.8 0C19.8 38.1 32 27.1 32 16 32 7.7 25.3 1 17 1z" fill="#EF4444" stroke="#B91C1C" stroke-width="1.2"/><circle cx="17" cy="16" r="6.2" fill="#fff"/><circle cx="17" cy="16" r="2.8" fill="#EF4444"/></svg>';
                 var destinationImage = null;
                 if (kakao.maps.MarkerImage && kakao.maps.Size && kakao.maps.Point) {
                   destinationImage = new kakao.maps.MarkerImage(

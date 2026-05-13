@@ -73,7 +73,7 @@ async function ensureLocationPermission() {
 
     if (navigator.permissions?.query) {
       try {
-        const status = await navigator.permissions.query({ name: 'geolocation' as any });
+        const status = await navigator.permissions.query({ name: 'geolocation' });
         if (status.state === 'denied') {
           throw new Error('Geolocation permission denied');
         }

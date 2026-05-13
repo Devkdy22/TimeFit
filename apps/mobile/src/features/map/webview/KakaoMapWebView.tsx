@@ -124,7 +124,8 @@ export const KakaoMapWebView = forwardRef<KakaoMapWebViewHandle, KakaoMapWebView
       [onEvent],
     );
 
-    const handleLayout = useCallback((_event: LayoutChangeEvent) => {
+    const handleLayout = useCallback((event: LayoutChangeEvent) => {
+      void event;
       // no-op to ensure view is measured before WebView draws in some Android devices.
     }, []);
 
