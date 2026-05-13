@@ -18,6 +18,8 @@ build/
 # logs
 logs/
 *.log
+!apps/api/src/modules/**/logs/
+!apps/api/src/modules/**/logs/*.ts
 
 # misc
 .DS_Store
