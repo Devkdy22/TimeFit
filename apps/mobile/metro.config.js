@@ -1,7 +1,9 @@
 import path from 'path';
-import { getDefaultConfig } from 'expo/metro-config';
+import { fileURLToPath } from 'url';
+import { getDefaultConfig } from 'expo/metro-config.js';
 
-const projectRoot = __dirname;
+const __filename = fileURLToPath(import.meta.url);
+const projectRoot = path.dirname(__filename);
 const workspaceRoot = path.resolve(projectRoot, '../..');
 
 const config = getDefaultConfig(projectRoot);
