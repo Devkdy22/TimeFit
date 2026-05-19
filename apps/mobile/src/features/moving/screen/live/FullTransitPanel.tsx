@@ -1,4 +1,4 @@
-import { StyleSheet, View } from 'react-native';
+import { StyleSheet } from 'react-native';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import type { LiveSheetProps } from './types';
 import { AlternateRouteCard } from './AlternateRouteCard';

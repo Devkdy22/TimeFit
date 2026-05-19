@@ -30,7 +30,7 @@ export function RoutineCreateScreen() {
   const [targetTime, setTargetTime] = useState(pendingRoutineSeed?.targetTime ?? '08:50');
   const [repeatDays, setRepeatDays] = useState<RoutineDay[]>(['mon', 'tue', 'wed', 'thu', 'fri']);
   const [notificationEnabled, setNotificationEnabled] = useState(true);
-  const [notificationMinutesBefore, setNotificationMinutesBefore] = useState(10);
+  const [notificationMinutesBefore] = useState(10);
   const [favorite, setFavorite] = useState(false);
   const [memo, setMemo] = useState('');
 

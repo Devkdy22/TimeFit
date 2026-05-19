@@ -146,7 +146,9 @@ export function prewarmRoute(route: MobilityRoutePayload) {
               if (normalized.length >= 20) {
                 return { id, mode, polyline: normalized, color: pickColor(segment, mode), zIndex: zIndex(mode) };
               }
-            } catch {}
+            } catch (error) {
+              void error;
+            }
           }
           return null;
         }
@@ -173,7 +175,9 @@ export function prewarmRoute(route: MobilityRoutePayload) {
             if (normalizedRoad.length >= 2) {
               return { id, mode, polyline: normalizedRoad, color: pickColor(segment, mode), zIndex: zIndex(mode) };
             }
-          } catch {}
+          } catch (error) {
+            void error;
+          }
         }
 
         const walk = normalizePathPoints([

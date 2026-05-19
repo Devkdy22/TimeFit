@@ -1,6 +1,6 @@
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { SocialProvider } from '../../features/auth/context';
-import { appColors, appSpacing, appTypography } from '../../theme/app-tokens';
+import { appColors, appTypography } from '../../theme/app-tokens';
 
 interface SocialLoginButtonProps {
   provider: SocialProvider;
