@@ -2,6 +2,7 @@
   "expo": {
     "name": "TimeFit",
     "slug": "timefit-mobile",
+    "entryPoint": "./node_modules/expo-router/entry",
     "scheme": "timefit",
     "version": "0.1.0",
     "orientation": "portrait",
