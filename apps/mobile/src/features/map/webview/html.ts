@@ -17,7 +17,7 @@ export function buildKakaoMapHtml({
 <html lang="ko">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <style>
       html, body, #map {
         width: 100%;
@@ -41,12 +41,17 @@ export function buildKakaoMapHtml({
         var routeOutlinePolyline = null;
         var routeSegmentPolylines = [];
         var routeTransferMarkers = [];
+        var routeWalkDotMarkers = [];
+        var latestRouteSegments = null;
         var traveledPolyline = null;
         var traveledOutlinePolyline = null;
         var routeBounds = null;
+        var fitPaddingBottom = 440;
+        var userInteractedViewport = false;
         var geocoder = null;
         var geocodeTimer = null;
         var geocodeRequestId = 0;
+        var walkDotRefreshTimer = null;
         var pendingProgrammaticSource = null;
         var lockedGpsPosition = {
           lat: ${marker.lat},
@@ -147,6 +152,7 @@ export function buildKakaoMapHtml({
             }
           });
           routeTransferMarkers = [];
+          clearWalkDotMarkers();
         }
 
         function clearTraveledPolyline() {
@@ -160,8 +166,11 @@ export function buildKakaoMapHtml({
           }
         }
 
-        function fitMapToRoute() {
+        function fitMapToRoute(force) {
           if (!map || !window.kakao || !window.kakao.maps || !window.kakao.maps.LatLngBounds) {
+            return;
+          }
+          if (!force && userInteractedViewport) {
             return;
           }
 
@@ -183,7 +192,7 @@ export function buildKakaoMapHtml({
           }
 
           if (hasAnyPoint) {
-            map.setBounds(bounds, 72, 40, 260, 40);
+            map.setBounds(bounds, 120, 64, fitPaddingBottom, 64);
           }
         }
 
@@ -191,11 +200,178 @@ export function buildKakaoMapHtml({
           var isWalk = segment && segment.mode === 'WALK';
           return {
             color: (segment && segment.color) || (isWalk ? '#8A8F98' : '#2D7FF9'),
-            outerWeight: 10,
-            innerWeight: 6,
-            innerStyle: isWalk ? 'shortdash' : 'solid',
+            outerWeight: 11,
+            innerWeight: 7,
+            innerStyle: isWalk ? 'shortdot' : 'solid',
             zIndex: segment && typeof segment.zIndex === 'number' ? segment.zIndex : (isWalk ? 20 : 30),
           };
+        }
+
+        function createWalkDotImage(color) {
+          if (!window.kakao || !window.kakao.maps || !kakao.maps.MarkerImage || !kakao.maps.Size || !kakao.maps.Point) {
+            return null;
+          }
+          var svg = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="7" r="4.8" fill="' + color + '" stroke="#FFFFFF" stroke-width="2"/></svg>';
+          return new kakao.maps.MarkerImage(
+            'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
+            new kakao.maps.Size(14, 14),
+            { offset: new kakao.maps.Point(7, 7) }
+          );
+        }
+
+        function toRadians(value) {
+          return value * Math.PI / 180;
+        }
+
+        function distanceMeters(a, b) {
+          var dLat = toRadians(b.lat - a.lat);
+          var dLng = toRadians(b.lng - a.lng);
+          var lat1 = toRadians(a.lat);
+          var lat2 = toRadians(b.lat);
+          var sinLat = Math.sin(dLat / 2);
+          var sinLng = Math.sin(dLng / 2);
+          var h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
+          return 2 * 6371000 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+        }
+
+        function buildEvenlySpacedWalkDots(rawPoints, spacingMeters) {
+          if (!Array.isArray(rawPoints) || rawPoints.length < 2) {
+            return [];
+          }
+          var points = rawPoints.filter(isValidCoordinate);
+          if (points.length < 2) {
+            return [];
+          }
+
+          var dots = [points[0]];
+          var remaining = spacingMeters;
+
+          for (var i = 1; i < points.length; i += 1) {
+            var prev = points[i - 1];
+            var next = points[i];
+            var segmentLength = distanceMeters(prev, next);
+            if (!Number.isFinite(segmentLength) || segmentLength <= 0.01) {
+              continue;
+            }
+
+            var start = prev;
+            var left = segmentLength;
+            while (left >= remaining) {
+              var ratio = remaining / left;
+              var point = {
+                lat: start.lat + (next.lat - start.lat) * ratio,
+                lng: start.lng + (next.lng - start.lng) * ratio,
+              };
+              dots.push(point);
+              start = point;
+              left = distanceMeters(start, next);
+              remaining = spacingMeters;
+            }
+            remaining -= left;
+            if (remaining < 0.5) {
+              remaining = spacingMeters;
+            }
+          }
+
+          var endPoint = points[points.length - 1];
+          var lastDot = dots[dots.length - 1];
+          if (!lastDot || distanceMeters(lastDot, endPoint) > spacingMeters * 0.45) {
+            dots.push(endPoint);
+          }
+          return dots;
+        }
+
+        function drawWalkDotMarkers(rawPoints, color, zIndex) {
+          if (!map || !Array.isArray(rawPoints) || rawPoints.length < 2) {
+            return;
+          }
+          var markerImage = createWalkDotImage(color || '#8A8F98');
+          var dotPoints = buildEvenlySpacedWalkDots(rawPoints, getWalkDotSpacingMeters());
+          for (var i = 0; i < dotPoints.length; i += 1) {
+            var p = dotPoints[i];
+            if (!isWithinKorea(p) || p.lat === 0 || p.lng === 0) {
+              continue;
+            }
+            var markerOptions = {
+              position: new kakao.maps.LatLng(p.lat, p.lng),
+              zIndex: zIndex + 2,
+            };
+            if (markerImage) {
+              markerOptions.image = markerImage;
+            }
+            var dotMarker = new kakao.maps.Marker(markerOptions);
+            dotMarker.setMap(map);
+            routeWalkDotMarkers.push(dotMarker);
+          }
+        }
+
+        function clearWalkDotMarkers() {
+          routeWalkDotMarkers.forEach(function (item) {
+            if (item && item.setMap) {
+              item.setMap(null);
+            }
+          });
+          routeWalkDotMarkers = [];
+        }
+
+        function refreshWalkDotsOnly() {
+          if (!map || !Array.isArray(latestRouteSegments)) {
+            return;
+          }
+          clearWalkDotMarkers();
+          latestRouteSegments.forEach(function (segment) {
+            if (!segment || segment.mode !== 'WALK') {
+              return;
+            }
+            var style = styleBySegment(segment);
+            drawWalkDotMarkers(Array.isArray(segment.polyline) ? segment.polyline : [], style.color, style.zIndex);
+          });
+        }
+
+        function scheduleWalkDotRefresh() {
+          if (walkDotRefreshTimer) {
+            clearTimeout(walkDotRefreshTimer);
+          }
+          walkDotRefreshTimer = setTimeout(function () {
+            refreshWalkDotsOnly();
+          }, 120);
+        }
+
+        function getWalkDotSpacingMeters() {
+          var width = Math.max(1, Number(window.innerWidth || 0));
+          var height = Math.max(1, Number(window.innerHeight || 0));
+          var shortEdge = Math.max(1, Math.min(width, height));
+          var basePx = 26;
+          var screenPxScale = Math.pow(shortEdge / 390, 0.85);
+          var targetPixelGap = basePx * screenPxScale;
+
+          if (!map || !window.kakao || !window.kakao.maps || typeof map.getBounds !== 'function') {
+          return Math.max(20, Math.min(60, targetPixelGap * 1.2));
+          }
+
+          var bounds = map.getBounds();
+          if (!bounds || !bounds.getSouthWest || !bounds.getNorthEast) {
+            return Math.max(20, Math.min(60, targetPixelGap * 1.2));
+          }
+
+          var sw = bounds.getSouthWest();
+          var ne = bounds.getNorthEast();
+          if (!sw || !ne) {
+            return Math.max(20, Math.min(60, targetPixelGap * 1.2));
+          }
+
+          var se = new kakao.maps.LatLng(sw.getLat(), ne.getLng());
+          var viewportWidthMeters = distanceMeters(
+            { lat: sw.getLat(), lng: sw.getLng() },
+            { lat: se.getLat(), lng: se.getLng() }
+          );
+          if (!Number.isFinite(viewportWidthMeters) || viewportWidthMeters <= 0) {
+            return Math.max(20, Math.min(60, targetPixelGap * 1.2));
+          }
+
+          var metersPerPixel = viewportWidthMeters / width;
+          var spacingMeters = metersPerPixel * targetPixelGap;
+          return Math.max(20, Math.min(90, spacingMeters));
         }
 
         post('MAP_BOOT', { href: String(window.location.href || '') });
@@ -421,6 +597,12 @@ export function buildKakaoMapHtml({
               center: center,
               level: 3,
             });
+            if (map.setZoomable) {
+              map.setZoomable(true);
+            }
+            if (map.setDraggable) {
+              map.setDraggable(true);
+            }
 
             var timiSvg = '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="#58C7C2" stroke="#FFFFFF" stroke-width="3"/></svg>';
             var timiImage = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(timiSvg);
@@ -489,7 +671,7 @@ export function buildKakaoMapHtml({
 
               routeOutlinePolyline = new kakao.maps.Polyline({
                 path: latLngPath,
-                strokeWeight: 10,
+                strokeWeight: 11,
                 strokeColor: '#FFFFFF',
                 strokeOpacity: 0.86,
                 strokeStyle: 'solid',
@@ -498,7 +680,7 @@ export function buildKakaoMapHtml({
 
               routePolyline = new kakao.maps.Polyline({
                 path: latLngPath,
-                strokeWeight: 6,
+                strokeWeight: 7,
                 strokeColor: '#4ECFC7',
                 strokeOpacity: 0.9,
                 strokeStyle: 'solid',
@@ -509,13 +691,15 @@ export function buildKakaoMapHtml({
               latLngPath.forEach(function (point) {
                 routeBounds.extend(point);
               });
-              fitMapToRoute();
+              userInteractedViewport = false;
+              fitMapToRoute(true);
             };
 
             window.setRouteSegments = function (segments) {
               if (!map || !Array.isArray(segments)) {
                 return;
               }
+              latestRouteSegments = segments;
 
               clearSegmentPolylines();
               clearRoutePolyline();
@@ -535,25 +719,32 @@ export function buildKakaoMapHtml({
                 }
 
                 var style = styleBySegment(segment);
-                var outline = new kakao.maps.Polyline({
-                  path: latLngPath,
-                  strokeWeight: style.outerWeight,
-                  strokeColor: '#FFFFFF',
-                  strokeOpacity: 0.95,
-                  strokeStyle: 'solid',
-                  zIndex: style.zIndex,
-                });
-                outline.setMap(map);
+                var isWalkSegment = segment && segment.mode === 'WALK';
+                var outline = null;
+                if (!isWalkSegment) {
+                  outline = new kakao.maps.Polyline({
+                    path: latLngPath,
+                    strokeWeight: style.outerWeight,
+                    strokeColor: '#FFFFFF',
+                    strokeOpacity: 0.95,
+                    strokeStyle: 'solid',
+                    zIndex: style.zIndex,
+                  });
+                  outline.setMap(map);
+                }
 
                 var main = new kakao.maps.Polyline({
                   path: latLngPath,
                   strokeWeight: style.innerWeight,
                   strokeColor: style.color,
-                  strokeOpacity: 1,
+                  strokeOpacity: isWalkSegment ? 0 : 1,
                   strokeStyle: style.innerStyle,
                   zIndex: style.zIndex + 1,
                 });
                 main.setMap(map);
+                if (isWalkSegment) {
+                  drawWalkDotMarkers(segment.polyline || [], style.color, style.zIndex);
+                }
 
                 routeSegmentPolylines.push({ outline: outline, main: main });
 
@@ -596,10 +787,19 @@ export function buildKakaoMapHtml({
 
               if (hasAnyBoundsPoint) {
                 routeBounds = nextBounds;
-                fitMapToRoute();
               } else {
                 routeBounds = null;
               }
+            };
+
+            window.setFitPaddingBottom = function (paddingBottom) {
+              var next = Number(paddingBottom);
+              if (!Number.isFinite(next)) {
+                return;
+              }
+              fitPaddingBottom = Math.max(300, Math.min(900, Math.round(next)));
+              userInteractedViewport = false;
+              fitMapToRoute(true);
             };
 
             window.setTraveledPath = function (points) {
@@ -684,15 +884,39 @@ export function buildKakaoMapHtml({
                 destinationMarker.setMap(map);
               }
 
-              fitMapToRoute();
+              fitMapToRoute(false);
             };
+
+            kakao.maps.event.addListener(map, 'dragstart', function () {
+              userInteractedViewport = true;
+            });
+
+            kakao.maps.event.addListener(map, 'zoom_start', function () {
+              userInteractedViewport = true;
+            });
 
             kakao.maps.event.addListener(map, 'dragend', function () {
               queueCenterResolve('dragend');
             });
 
             kakao.maps.event.addListener(map, 'zoom_changed', function () {
-              queueCenterResolve('zoom_changed');
+              scheduleWalkDotRefresh();
+            });
+
+            kakao.maps.event.addListener(map, 'click', function (mouseEvent) {
+              if (!mouseEvent || !mouseEvent.latLng) {
+                return;
+              }
+              var lat = Number(mouseEvent.latLng.getLat());
+              var lng = Number(mouseEvent.latLng.getLng());
+              if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+                return;
+              }
+              post('MAP_TAP', { lat: round6(lat), lng: round6(lng) });
+            });
+
+            window.addEventListener('resize', function () {
+              scheduleWalkDotRefresh();
             });
 
             queueCenterResolve('init');

@@ -1,50 +1,173 @@
+import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
-import { BottomCTA, ScreenContainer, SectionHeader, StatusBadge } from '../../../components/ui';
-import { uiTheme } from '../../../constants/theme';
+import { AppScreen, Header, InfoCard, PrimaryButton, SecondaryButton, TimeyMascot } from '../../../components/app';
+import { useAuth } from '../../auth/context';
+import type { ArrivalSummary } from '../model/types';
+import { appColors, appTypography } from '../../../theme/app-tokens';
 import { useNavigationHelper } from '../../../utils/navigation';
+
+const mockArrivalSummary: ArrivalSummary = {
+  originName: '집',
+  destinationName: '회사',
+  departureTime: '08:12',
+  arrivalTime: '09:25',
+  durationText: '1시간 13분',
+  status: 'onTime',
+  statusLabel: '예정시간 도착',
+  bufferMinutes: 4,
+};
 
 export function ArrivalScreen() {
   const nav = useNavigationHelper();
+  const { isLoggedIn, setPendingRoutineSeed } = useAuth();
+
+  const onPressSaveRoutine = () => {
+    setPendingRoutineSeed({
+      originName: mockArrivalSummary.originName,
+      destinationName: mockArrivalSummary.destinationName,
+      targetTime: mockArrivalSummary.arrivalTime,
+    });
+
+    if (isLoggedIn) {
+      nav.goToRoutineCreate();
+      return;
+    }
+
+    nav.goToLogin();
+  };
 
   return (
-    <ScreenContainer contentContainerStyle={styles.container}>
-      <SectionHeader title="도착 완료" subtitle="이동이 마무리되었습니다" status="relaxed" />
+    <AppScreen scrollable contentContainerStyle={styles.container}>
+      <Header title="도착 완료" onPressBack={nav.goBack} />
 
-      <View style={styles.content}>
-        <StatusBadge status="relaxed" label="ON TIME" />
-        <Text style={styles.title}>예정 시간에 도착했어요.</Text>
-        <Text style={styles.body}>다음 이동을 위해 루틴과 설정을 확인해보세요.</Text>
+      <View style={styles.hero}>
+        <View style={styles.heroIcon}>
+          <Ionicons name="checkmark" size={34} color="#FFFFFF" />
+        </View>
+        <Text style={styles.heroTitle}>도착 완료!</Text>
+        <Text style={styles.heroSubtitle}>예정 시간에 맞춰 도착했어요.</Text>
+        <TimeyMascot size={92} expression="smile" />
       </View>
+
+      <InfoCard>
+        <View style={styles.summaryHeaderRow}>
+          <Text style={styles.cardTitle}>이동 요약</Text>
+          <View style={styles.badge}>
+            <Text style={styles.badgeText}>{mockArrivalSummary.statusLabel}</Text>
+          </View>
+        </View>
+
+        <View style={styles.summaryGrid}>
+          <View style={styles.summaryRow}>
+            <Text style={styles.key}>출발 시간</Text>
+            <Text style={styles.value}>{mockArrivalSummary.departureTime}</Text>
+          </View>
+          <View style={styles.summaryRow}>
+            <Text style={styles.key}>도착 시간</Text>
+            <Text style={styles.value}>{mockArrivalSummary.arrivalTime}</Text>
+          </View>
+          <View style={styles.summaryRow}>
+            <Text style={styles.key}>총 소요 시간</Text>
+            <Text style={styles.value}>{mockArrivalSummary.durationText}</Text>
+          </View>
+        </View>
+
+        <Text style={styles.route}>{mockArrivalSummary.originName} {'->'} {mockArrivalSummary.destinationName}</Text>
+        <View style={styles.routeLine}>
+          <View style={styles.routeProgress} />
+        </View>
+      </InfoCard>
 
       <View style={styles.actions}>
-        <BottomCTA label="루틴 보기" status="warning" onPress={nav.goToRoutines} />
-        <BottomCTA label="홈으로" status="relaxed" onPress={nav.goToHome} />
+        <PrimaryButton label="다음 이동 계획하기" onPress={nav.goToSearch} />
+        <SecondaryButton label="이 경로를 루틴으로 저장" onPress={onPressSaveRoutine} />
       </View>
-    </ScreenContainer>
+    </AppScreen>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
+    paddingBottom: 32,
+  },
+  hero: {
+    minHeight: 230,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  heroIcon: {
+    width: 70,
+    height: 70,
+    borderRadius: 35,
+    backgroundColor: appColors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroTitle: {
+    color: appColors.textPrimary,
+    ...appTypography.screenTitle,
+  },
+  heroSubtitle: {
+    color: appColors.textSecondary,
+    ...appTypography.body,
+  },
+  cardTitle: {
+    color: appColors.textPrimary,
+    ...appTypography.cardTitle,
+  },
+  summaryHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+  },
+  badge: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: appColors.primaryLight,
+  },
+  badgeText: {
+    color: appColors.primaryDark,
+    ...appTypography.small,
+  },
+  summaryGrid: {
+    gap: 8,
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
   },
-  content: {
-    borderRadius: uiTheme.radius.large,
-    backgroundColor: uiTheme.colors.card,
-    borderWidth: 1,
-    borderColor: uiTheme.colors.divider,
-    padding: uiTheme.spacing.s20,
-    gap: uiTheme.spacing.s8,
+  key: {
+    color: appColors.textSecondary,
+    ...appTypography.caption,
   },
-  title: {
-    ...uiTheme.typography.title,
-    color: uiTheme.colors.textPrimary,
+  value: {
+    color: appColors.textPrimary,
+    textAlign: 'right',
+    ...appTypography.body,
   },
-  body: {
-    ...uiTheme.typography.body,
-    color: uiTheme.colors.textSecondary,
+  route: {
+    marginTop: 14,
+    color: appColors.textPrimary,
+    ...appTypography.body,
+  },
+  routeLine: {
+    height: 4,
+    marginTop: 12,
+    borderRadius: 999,
+    backgroundColor: '#E9F4F3',
+  },
+  routeProgress: {
+    width: '82%',
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: appColors.primary,
   },
   actions: {
-    gap: uiTheme.spacing.s8,
+    gap: 10,
+    paddingBottom: 8,
   },
 });

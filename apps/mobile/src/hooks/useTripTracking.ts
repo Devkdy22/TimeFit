@@ -34,6 +34,7 @@ interface UseTripTrackingInput {
   destination?: RecommendLocation;
   targetArrivalTime?: string;
   preferredRouteId?: string;
+  previewOnly?: boolean;
   getCurrentPosition: () => Promise<{
     lat: number;
     lng: number;
@@ -117,6 +118,7 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
   const [isRunning, setIsRunning] = useState(false);
   const [isConnectingSse, setIsConnectingSse] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const isRunningRef = useRef(false);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const lastEventIdRef = useRef<string | null>(null);
@@ -380,13 +382,19 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
         throw new Error('No route candidates returned');
       }
 
+      setRoute(selectedRoute);
+
+      if (input.previewOnly) {
+        setStatus('여유');
+        startRequestedRef.current = false;
+        return;
+      }
+
       const pos = await input.getCurrentPosition();
       if (!pos) {
         throw new Error('Current position unavailable');
       }
       setCurrentPosition(pos);
-
-      setRoute(selectedRoute);
 
       const started = await startTripTracking({
         userId: 'mobile-user',
@@ -412,18 +420,25 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
   }, [canStart, connectSse, input, isRunning, startPositionLoop]);
 
   useEffect(() => {
+    isRunningRef.current = isRunning;
+  }, [isRunning]);
+
+  useEffect(() => {
     appStateListenerRef.current = AppState.addEventListener('change', (nextState) => {
       appStateRef.current = nextState;
-      if (isRunning) {
+      if (isRunningRef.current) {
         startPositionLoop();
       }
     });
 
     return () => {
       appStateListenerRef.current?.remove();
-      stop();
     };
-  }, [isRunning, startPositionLoop, stop]);
+  }, [startPositionLoop]);
+
+  useEffect(() => () => {
+    stop();
+  }, [stop]);
 
   return {
     tripId,

@@ -256,6 +256,7 @@ function toRouteCardItem(route: RecommendedRoute, features?: string[]): RouteCar
     stabilityLabel,
     reason: featureText,
     segments,
+    rawRoute: route.route,
   };
 }
 

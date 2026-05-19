@@ -7,6 +7,7 @@ export type MapCenterSource = 'gps' | 'search' | 'user' | 'init';
 export type KakaoMapWebViewEvent =
   | { type: 'MAP_BOOT'; href: string }
   | { type: 'MAP_READY' }
+  | { type: 'MAP_TAP'; lat: number; lng: number }
   | {
       type: 'MAP_MOVED';
       lat: number;
@@ -32,6 +33,7 @@ export interface KakaoMapWebViewProps {
 export interface KakaoMapWebViewHandle {
   moveTo: (coordinate: MapCoordinate & { source?: MapCenterSource }) => void;
   moveMarker: (coordinate: MapCoordinate) => void;
+  setFitPaddingBottom: (paddingBottom: number) => void;
   setRoutePath: (points: MapCoordinate[]) => void;
   setRouteSegments: (segments: MapRouteSegment[]) => void;
   setTraveledPath: (points: MapCoordinate[]) => void;

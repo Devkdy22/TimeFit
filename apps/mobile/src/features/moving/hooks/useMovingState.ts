@@ -721,6 +721,10 @@ export function useMovingState() {
   const progressPercent = Math.round(progress * 100);
   const remainingDistanceMeters = Math.max(0, Math.round(tracking.movement?.distanceFromRouteMeters ?? 0));
   const remainingTimeMinutes = Math.max(1, Math.round((1 - progress) * ((tracking.route?.estimatedTravelMinutes ?? 45))));
+  const now = new Date();
+  const arrivalDate = new Date(now.getTime() + remainingTimeMinutes * 60 * 1000);
+  const currentClock = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const arrivalClock = arrivalDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
 
   const mapData: MovingMapData = useMemo(() => {
     const fallback = movingMapMockData;
@@ -931,8 +935,8 @@ export function useMovingState() {
     progressPercent,
     remainingDistanceText: `${remainingDistanceMeters}m`,
     remainingTimeText: `${remainingTimeMinutes}분`,
-    currentTimeText: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false }),
-    arrivalTimeText: `+${remainingTimeMinutes}분`,
+    currentTimeText: currentClock,
+    arrivalTimeText: arrivalClock,
     statusMessage:
       status === 'urgent'
         ? '지금 바로 이동 속도를 올려주세요!'

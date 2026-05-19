@@ -1,3 +1,4 @@
+import { Keyboard } from 'react-native';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { inferPlaceIconType, useCommutePlan, type LocationField, type SavedPlace } from '../../commute-state/context';
 import { getNearbyPoiLocationInfoViaProxy, searchKakaoKeywordViaProxy } from '../../../services/api/client';
@@ -597,6 +598,7 @@ export function useSearchState() {
   const selectPlaceForActiveField = (place: SavedPlace) => {
     selectPlaceToField(activeField, place);
     setFieldSuggestions([]);
+    Keyboard.dismiss();
   };
 
   const prepareSelectFromSuggestion = (field: LocationField) => {
@@ -610,10 +612,12 @@ export function useSearchState() {
     selectPlaceToField('destination', place);
     setActiveField('destination');
     setFieldSuggestions([]);
+    Keyboard.dismiss();
   };
 
   const selectRecentDestination = (place: SavedPlace) => {
     selectPlaceToField('destination', place);
+    Keyboard.dismiss();
   };
 
   const applyMapCenterToActiveField = () => {
@@ -632,6 +636,7 @@ export function useSearchState() {
 
     selectPlaceToField(activeField, nextPlace);
     setFieldSuggestions([]);
+    Keyboard.dismiss();
   };
 
   const setOriginToCurrentLocation = async () => {
@@ -658,6 +663,7 @@ export function useSearchState() {
       selectPlaceToField('origin', place);
       setActiveField('origin');
       setFieldSuggestions([]);
+      Keyboard.dismiss();
     } catch (error) {
       console.info('[Search]', 'set current origin failed', {
         message: error instanceof Error ? error.message : String(error),

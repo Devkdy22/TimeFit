@@ -54,6 +54,10 @@ function buildSetRoutePathScript(points: MapCoordinate[]): string {
   return `window.setRoutePath && window.setRoutePath(${packed}); true;`;
 }
 
+function buildSetFitPaddingBottomScript(paddingBottom: number): string {
+  return `window.setFitPaddingBottom && window.setFitPaddingBottom(${Math.max(180, Math.round(paddingBottom))}); true;`;
+}
+
 function buildSetRouteSegmentsScript(segments: MapRouteSegment[]): string {
   const packed = JSON.stringify(segments);
   return `window.setRouteSegments && window.setRouteSegments(${packed}); true;`;
@@ -96,6 +100,9 @@ export const KakaoMapWebView = forwardRef<KakaoMapWebViewHandle, KakaoMapWebView
         },
         moveMarker(coordinate: MapCoordinate) {
           webViewRef.current?.injectJavaScript(buildMoveMarkerScript(coordinate));
+        },
+        setFitPaddingBottom(paddingBottom: number) {
+          webViewRef.current?.injectJavaScript(buildSetFitPaddingBottomScript(paddingBottom));
         },
         setRoutePath(points: MapCoordinate[]) {
           webViewRef.current?.injectJavaScript(buildSetRoutePathScript(points));
@@ -167,6 +174,8 @@ export const KakaoMapWebView = forwardRef<KakaoMapWebViewHandle, KakaoMapWebView
           source={{ html, baseUrl: WEBVIEW_BASE_URL }}
           javaScriptEnabled
           domStorageEnabled
+          scrollEnabled={false}
+          bounces={false}
           onMessage={handleMessage}
           onError={handleError}
           onHttpError={handleHttpError}

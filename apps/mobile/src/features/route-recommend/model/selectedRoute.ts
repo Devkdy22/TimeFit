@@ -1,3 +1,5 @@
+import type { MobilityRoutePayload } from '../../../services/api/client';
+
 export type RouteSegment = {
   mode: 'walk' | 'bus' | 'subway';
   durationMinutes: number;
@@ -34,4 +36,5 @@ export interface SelectedRouteSummary {
   stabilityLabel: string;
   reason: string;
   segments: RouteSegment[];
+  rawRoute?: MobilityRoutePayload;
 }

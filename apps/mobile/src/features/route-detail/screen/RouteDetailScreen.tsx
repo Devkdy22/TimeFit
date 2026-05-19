@@ -34,20 +34,22 @@ function toRouteSyncKey(
 }
 
 export function RouteDetailScreen() {
+  const freezeRouteRefresh =
+    (process.env.EXPO_PUBLIC_FREEZE_ROUTE_RECOMMENDATION ?? '').toLowerCase() === 'true';
   const nav = useNavigationHelper();
   const { selectedRoute, origin, destination, setSelectedRoute } = useCommutePlan();
   const { lineLabel, steps } = useRouteDetailState(selectedRoute);
   const recommendState = useRouteRecommendState();
 
   useEffect(() => {
-    if (!selectedRoute) {
+    if (!selectedRoute || freezeRouteRefresh) {
       return;
     }
     const timer = setInterval(() => {
       void recommendState.refetch();
     }, ROUTE_DETAIL_REFRESH_MS);
     return () => clearInterval(timer);
-  }, [recommendState.refetch, selectedRoute]);
+  }, [freezeRouteRefresh, recommendState.refetch, selectedRoute]);
 
   useEffect(() => {
     if (!selectedRoute) {
@@ -75,7 +77,12 @@ export function RouteDetailScreen() {
       destinationLabel={destination?.name ?? destination?.address ?? ''}
       onPressStart={nav.goToBeforeDepartureTransitPopup}
       onPressBack={nav.goBack}
-      onPressRefresh={() => void recommendState.refetch()}
+      onPressRefresh={() => {
+        if (freezeRouteRefresh) {
+          return;
+        }
+        void recommendState.refetch();
+      }}
     />
   );
 }

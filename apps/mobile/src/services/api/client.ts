@@ -771,6 +771,34 @@ function mapOdsayPathToRoute(
       } satisfies MobilitySegmentPayload;
     });
   const segments = mappedSegments.filter((segment): segment is MobilitySegmentPayload => segment !== null);
+  segments.forEach((segment, segmentIndex) => {
+    const routeGeometryLen = segment.routeGeometry?.length ?? 0;
+    const pathPointsLen = segment.pathPoints?.length ?? 0;
+    console.log('[RouteGeometry][ODSAY_CLIENT_SEGMENT]', {
+      routeId: `odsay-client-${index + 1}`,
+      segmentIndex,
+      mode: segment.mode,
+      lineLabel: segment.lineLabel ?? null,
+      startName: segment.startName ?? null,
+      endName: segment.endName ?? null,
+      busRouteId: segment.busRouteId ?? null,
+      routeGeometryLen,
+      pathPointsLen,
+    });
+    if (routeGeometryLen <= 2) {
+      console.warn('[RouteGeometry][ODSAY_CLIENT_SEGMENT][INSUFFICIENT_ROUTE_GEOMETRY]', {
+        routeId: `odsay-client-${index + 1}`,
+        segmentIndex,
+        mode: segment.mode,
+        lineLabel: segment.lineLabel ?? null,
+        startName: segment.startName ?? null,
+        endName: segment.endName ?? null,
+        busRouteId: segment.busRouteId ?? null,
+        routeGeometryLen,
+        pathPointsLen,
+      });
+    }
+  });
 
   const transitCount = segments.filter((segment) => segment.mode === 'bus' || segment.mode === 'subway').length;
   if (segments.length === 0 || transitCount === 0) {
