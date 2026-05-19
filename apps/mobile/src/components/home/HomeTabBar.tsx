@@ -17,8 +17,8 @@ export function HomeTabBar({ status = 'relaxed' }: HomeTabBarProps) {
   const activeColor = toneColor[status];
 
   return (
-    <View style={styles.wrapper}>
-      <View style={styles.container}>
+    <View pointerEvents="box-none" style={styles.wrapper}>
+      <View pointerEvents="auto" style={styles.container}>
         <View style={styles.tabWrap}>
           <Ionicons name="bookmark-outline" size={20} color={activeColor} />
           <Text style={[styles.tab, { color: activeColor }]}>저장</Text>

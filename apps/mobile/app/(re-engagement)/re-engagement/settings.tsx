@@ -1,4 +1,4 @@
-import { SettingsScreen } from '../../../src/features/settings/screen/SettingsScreen';
+import { SettingsScreen } from '../../../src/screens/settings/SettingsScreen';
 
 export default function ReengagementSettingsPage() {
   return <SettingsScreen />;

@@ -1,5 +1,4 @@
 export const APP_ROUTES = {
-  // Primary user-flow routes
   beforeStartOnboarding: '/before-start/onboarding',
   beforeStartHome: '/before-start/home',
   beforeStartSearch: '/before-start/search',
@@ -11,8 +10,20 @@ export const APP_ROUTES = {
   reengagementRoutines: '/re-engagement/routines',
   reengagementLogin: '/re-engagement/login',
   reengagementSettings: '/re-engagement/settings',
+  reengagementRoutineCreate: '/re-engagement/routine-create',
+  settingsDepartureNotification: '/re-engagement/settings/departure-notification',
+  settingsRoutineNotification: '/re-engagement/settings/routine-notification',
+  settingsEmergencyNotification: '/re-engagement/settings/emergency-notification',
+  settingsTheme: '/re-engagement/settings/theme',
+  settingsAccount: '/re-engagement/settings/account',
+  settingsLanguage: '/re-engagement/settings/language',
+  settingsUnit: '/re-engagement/settings/unit',
+  settingsTimeFormat: '/re-engagement/settings/time-format',
+  settingsTerms: '/re-engagement/settings/terms',
+  settingsPrivacy: '/re-engagement/settings/privacy',
+  settingsHelp: '/re-engagement/settings/help',
+  settingsAbout: '/re-engagement/settings/about',
 
-  // Legacy routes kept for gradual migration/bridge
   onboarding: '/onboarding',
   home: '/(tabs)/home',
   routine: '/(tabs)/routine',

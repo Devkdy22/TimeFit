@@ -1,17 +1,12 @@
+import { useAuth } from '../../auth/context';
 import { useSettingsState } from '../hooks/useSettingsState';
 import { SettingsView } from './SettingsView';
 import { useNavigationHelper } from '../../../utils/navigation';
 
 export function SettingsScreen() {
   const nav = useNavigationHelper();
-  const {
-    isNotificationEnabled,
-    isLiveLocationEnabled,
-    isLoggedIn,
-    setNotificationEnabled,
-    setLiveLocationEnabled,
-    toggleLoggedIn,
-  } = useSettingsState();
+  const { isLoggedIn, login, logout } = useAuth();
+  const { isNotificationEnabled, isLiveLocationEnabled, setNotificationEnabled, setLiveLocationEnabled } = useSettingsState();
 
   return (
     <SettingsView
@@ -20,7 +15,13 @@ export function SettingsScreen() {
       isLoggedIn={isLoggedIn}
       onChangeNotification={setNotificationEnabled}
       onChangeLiveLocation={setLiveLocationEnabled}
-      onToggleLogin={toggleLoggedIn}
+      onToggleLogin={() => {
+        if (isLoggedIn) {
+          logout();
+          return;
+        }
+        void login('google');
+      }}
       onPressTestMap={nav.goToTransit}
       onPressOnboarding={nav.goToOnboarding}
     />
