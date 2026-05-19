@@ -387,29 +387,40 @@ export class RecommendationService {
   private logRealtimeSegmentReasons(recommendation: RecommendationResult) {
     const routes = [recommendation.primaryRoute, ...recommendation.alternatives];
     const segments = routes.flatMap((item) =>
-      (item.route.mobilitySegments ?? []).map((segment, index) => ({
-        routeId: item.route.id,
-        index,
-        mode: segment.mode,
-        lineLabel: segment.lineLabel ?? null,
-        startName: segment.startName ?? null,
-        endName: segment.endName ?? null,
-        startStationId: segment.startStationId ?? null,
-        endStationId: segment.endStationId ?? null,
-        startArsId: segment.startArsId ?? null,
-        endArsId: segment.endArsId ?? null,
-        startLat: segment.startLat ?? null,
-        startLng: segment.startLng ?? null,
-        endLat: segment.endLat ?? null,
-        endLng: segment.endLng ?? null,
-        busRouteId: segment.busRouteId ?? null,
-        realtimeStatus: segment.realtimeStatus ?? 'SCHEDULED',
-        etaMinutes: segment.realtimeInfo?.etaMinutes ?? null,
-        reasonCode: segment.realtimeInfo?.reasonCode ?? null,
-        source: segment.realtimeInfo?.source ?? null,
-        updatedAt: segment.realtimeInfo?.updatedAt ?? null,
-        debug: segment.realtimeInfo?.debug ?? null,
-      })),
+      (item.route.mobilitySegments ?? []).map((segment, index) => {
+        const segmentRecord = segment as unknown as Record<string, unknown>;
+        const routeGeometry = Array.isArray(segmentRecord.routeGeometry)
+          ? (segmentRecord.routeGeometry as unknown[])
+          : null;
+        const pathPoints = Array.isArray(segmentRecord.pathPoints)
+          ? (segmentRecord.pathPoints as unknown[])
+          : null;
+        return {
+          routeId: item.route.id,
+          index,
+          mode: segment.mode,
+          lineLabel: segment.lineLabel ?? null,
+          startName: segment.startName ?? null,
+          endName: segment.endName ?? null,
+          startStationId: segment.startStationId ?? null,
+          endStationId: segment.endStationId ?? null,
+          startArsId: segment.startArsId ?? null,
+          endArsId: segment.endArsId ?? null,
+          startLat: segment.startLat ?? null,
+          startLng: segment.startLng ?? null,
+          endLat: segment.endLat ?? null,
+          endLng: segment.endLng ?? null,
+          busRouteId: segment.busRouteId ?? null,
+          routeGeometryLen: routeGeometry ? routeGeometry.length : null,
+          pathPointsLen: pathPoints ? pathPoints.length : null,
+          realtimeStatus: segment.realtimeStatus ?? 'SCHEDULED',
+          etaMinutes: segment.realtimeInfo?.etaMinutes ?? null,
+          reasonCode: segment.realtimeInfo?.reasonCode ?? null,
+          source: segment.realtimeInfo?.source ?? null,
+          updatedAt: segment.realtimeInfo?.updatedAt ?? null,
+          debug: segment.realtimeInfo?.debug ?? null,
+        };
+      }),
     );
     const busResolved = segments
       .filter((segment) => segment.mode === 'bus')

@@ -294,6 +294,7 @@ function mapSubPathToSegment(
   const endArsId = readString(rawSubPath, ['endArsID', 'endArsId']);
   const busRouteId = mode === 'bus' ? resolveBusRouteId(subPath) : undefined;
   const passStops = resolvePassStops(subPath, rawSubPath);
+  const routeGeometry = resolveRouteGeometry(subPath, rawSubPath);
 
   return {
     reason: ODSAY_DROP_REASONS.UNKNOWN_MAPPING_ERROR,
@@ -316,12 +317,52 @@ function mapSubPathToSegment(
       startLng: parseCoordinate(subPath.startX),
       endLat: parseCoordinate(subPath.endY),
       endLng: parseCoordinate(subPath.endX),
+      routeGeometry,
       passStops,
       realtimeAdjustedDurationMinutes: durationMinutes,
       realtimeStatus,
       delayMinutes: 0,
     },
   };
+}
+
+function resolveRouteGeometry(
+  subPath: OdsaySubPath,
+  rawSubPath: Record<string, unknown>,
+): Array<{ lat: number; lng: number }> | undefined {
+  const directStations = subPath.passStopList?.stations ?? [];
+  const rawPassStopList = rawSubPath.passStopList as Record<string, unknown> | undefined;
+  const rawStations =
+    (rawPassStopList?.stations as Array<Record<string, unknown>> | undefined) ??
+    (rawPassStopList?.station as Array<Record<string, unknown>> | undefined) ??
+    [];
+
+  const rows: Array<Record<string, unknown>> = [
+    ...directStations.map((station) => station as Record<string, unknown>),
+    ...rawStations,
+  ];
+
+  const points = rows
+    .map((row) => {
+      const lat = parseCoordinate(row.y as string | number | undefined)
+        ?? parseCoordinate(row.lat as string | number | undefined)
+        ?? parseCoordinate(row.latitude as string | number | undefined);
+      const lng = parseCoordinate(row.x as string | number | undefined)
+        ?? parseCoordinate(row.lng as string | number | undefined)
+        ?? parseCoordinate(row.longitude as string | number | undefined);
+      if (typeof lat !== 'number' || typeof lng !== 'number') {
+        return null;
+      }
+      return { lat, lng };
+    })
+    .filter((point): point is { lat: number; lng: number } => Boolean(point));
+
+  const unique = points.filter((point, index, arr) => {
+    if (index === 0) return true;
+    const prev = arr[index - 1];
+    return Math.abs(prev.lat - point.lat) > 0.000001 || Math.abs(prev.lng - point.lng) > 0.000001;
+  });
+  return unique.length > 0 ? unique : undefined;
 }
 
 function resolvePassStops(subPath: OdsaySubPath, rawSubPath: Record<string, unknown>): string[] {

@@ -65,6 +65,10 @@ export interface MobilitySegment {
   startLng?: number;
   endLat?: number;
   endLng?: number;
+  routeGeometry?: Array<{
+    lat: number;
+    lng: number;
+  }>;
   passStops?: string[];
   realtimeAdjustedDurationMinutes?: number;
   realtimeStatus?: RealtimeStatus;
