@@ -1,0 +1,12 @@
+{
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "12187187-f473-40da-a9ab-e4140a5566ba"
+      }
+    },
+    "android": {
+      "package": "com.devkdy.timefit"
+    }
+  }
+}
