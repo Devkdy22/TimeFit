@@ -101,6 +101,8 @@ interface UseTripTrackingState {
   stop: () => void;
 }
 
+type EventSourceState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
+
 export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingState {
   const [tripId, setTripId] = useState<string | null>(null);
   const [route, setRoute] = useState<MobilityRoutePayload | null>(null);
@@ -128,6 +130,36 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
   const appStateRef = useRef(AppState.currentState);
   const appStateListenerRef = useRef<ReturnType<typeof AppState.addEventListener> | null>(null);
   const startRequestedRef = useRef(false);
+  const tripIdRef = useRef<string | null>(null);
+  const mountCountRef = useRef(0);
+  const sessionGenerationRef = useRef(0);
+  const positionInFlightRef = useRef(false);
+  const eventSourceStateRef = useRef<EventSourceState>('idle');
+  const activeLoopCountRef = useRef(0);
+  const lastPositionTimestampRef = useRef(0);
+
+  const logDebug = useCallback(
+    (event: string, fields?: Record<string, unknown>) => {
+      console.debug('[TripTracking]', {
+        event,
+        tripId: tripId ?? null,
+        sessionGeneration: sessionGenerationRef.current,
+        reconnectAttempt: reconnectAttemptRef.current,
+        activeLoopCount: activeLoopCountRef.current,
+        EventSourceState: eventSourceStateRef.current,
+        lastPositionTimestamp: lastPositionTimestampRef.current,
+        ...(fields ?? {}),
+      });
+    },
+    [tripId],
+  );
+
+  const updateActiveLoopCount = useCallback(() => {
+    activeLoopCountRef.current =
+      (positionTimerRef.current ? 1 : 0) +
+      (reconnectTimerRef.current ? 1 : 0) +
+      (eventSourceRef.current ? 1 : 0);
+  }, []);
 
   const canStart = useMemo(
     () => Boolean(input.origin && input.destination && input.targetArrivalTime),
@@ -140,7 +172,8 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
     }
     clearTimeout(reconnectTimerRef.current);
     reconnectTimerRef.current = null;
-  }, []);
+    updateActiveLoopCount();
+  }, [updateActiveLoopCount]);
 
   const clearPositionTimer = useCallback(() => {
     if (!positionTimerRef.current) {
@@ -148,14 +181,17 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
     }
     clearInterval(positionTimerRef.current);
     positionTimerRef.current = null;
-  }, []);
+    updateActiveLoopCount();
+  }, [updateActiveLoopCount]);
 
   const closeEventSource = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
       eventSourceRef.current = null;
+      eventSourceStateRef.current = 'closed';
+      updateActiveLoopCount();
     }
-  }, []);
+  }, [updateActiveLoopCount]);
 
   const applyEventPayload = useCallback((payload: Record<string, unknown>) => {
     const routeSummary = payload.routeSummary as
@@ -204,15 +240,24 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
   }, []);
 
   const connectSse = useCallback(
-    (nextTripId: string) => {
+    (nextTripId: string, generation: number) => {
+      if (generation !== sessionGenerationRef.current) {
+        return;
+      }
+
       if (typeof EventSource === 'undefined') {
         setError('SSE(EventSource) is not available in this runtime.');
+        logDebug('sse_unavailable', {
+          nextTripId,
+          generation,
+        });
         return;
       }
 
       clearReconnectTimer();
       closeEventSource();
       setIsConnectingSse(true);
+      eventSourceStateRef.current = 'connecting';
 
       const base =
         process.env.EXPO_PUBLIC_API_URL ??
@@ -223,14 +268,32 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       const query = lastEventId ? `?lastEventId=${encodeURIComponent(lastEventId)}` : '';
       const source = new EventSource(`${normalizedBase}/trips/${encodeURIComponent(nextTripId)}/events${query}`);
       eventSourceRef.current = source;
+      updateActiveLoopCount();
+      logDebug('sse_connecting', {
+        nextTripId,
+        generation,
+        hasLastEventId: Boolean(lastEventId),
+      });
 
       source.addEventListener('open', () => {
+        if (generation !== sessionGenerationRef.current) {
+          return;
+        }
         reconnectAttemptRef.current = 0;
         setIsConnectingSse(false);
+        eventSourceStateRef.current = 'open';
+        logDebug('sse_open', {
+          nextTripId,
+          generation,
+        });
       });
 
       const handleNamedEvent = (eventType: string) => {
         source.addEventListener(eventType, (event: MessageEvent) => {
+          if (generation !== sessionGenerationRef.current) {
+            return;
+          }
+
           const id = (event as MessageEvent & { lastEventId?: string }).lastEventId;
           if (id) {
             lastEventIdRef.current = id;
@@ -265,6 +328,10 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
             applyEventPayload(payload);
           } catch {
             setError('Failed to parse SSE payload.');
+            logDebug('sse_parse_error', {
+              eventType,
+              generation,
+            });
           }
         });
       };
@@ -274,41 +341,72 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       );
 
       source.addEventListener('ERROR', (event: MessageEvent) => {
+        if (generation !== sessionGenerationRef.current) {
+          return;
+        }
         try {
           const payload = JSON.parse(event.data) as { message?: string };
           if (payload.message) {
             setError(payload.message);
+            logDebug('sse_server_error', {
+              generation,
+              message: payload.message,
+            });
           }
         } catch {
           setError('SSE error');
+          logDebug('sse_server_error_parse_failed', {
+            generation,
+          });
         }
         source.close();
+        eventSourceStateRef.current = 'closed';
+        updateActiveLoopCount();
       });
 
       source.onerror = () => {
+        if (generation !== sessionGenerationRef.current) {
+          return;
+        }
         setIsConnectingSse(false);
         source.close();
+        eventSourceStateRef.current = 'error';
+        updateActiveLoopCount();
 
-        if (!isRunning) {
+        if (!isRunningRef.current) {
+          logDebug('sse_reconnect_skipped_not_running', {
+            generation,
+          });
           return;
         }
 
         reconnectAttemptRef.current += 1;
         const backoffMs = Math.min(10_000, 1000 * 2 ** reconnectAttemptRef.current);
+        logDebug('sse_reconnect_scheduled', {
+          generation,
+          backoffMs,
+        });
 
+        clearReconnectTimer();
         reconnectTimerRef.current = setTimeout(() => {
-          connectSse(nextTripId);
+          if (generation !== sessionGenerationRef.current) {
+            return;
+          }
+          connectSse(nextTripId, generation);
         }, backoffMs);
+        updateActiveLoopCount();
       };
     },
-    [applyEventPayload, clearReconnectTimer, closeEventSource, isRunning],
+    [applyEventPayload, clearReconnectTimer, closeEventSource, logDebug, updateActiveLoopCount],
   );
 
   const sendPositionTick = useCallback(async () => {
-    if (!tripId) {
+    const activeTripId = tripIdRef.current;
+    if (!activeTripId || positionInFlightRef.current) {
       return;
     }
 
+    positionInFlightRef.current = true;
     try {
       const position = await input.getCurrentPosition();
       if (!position) {
@@ -319,10 +417,14 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
         ...position,
         timestamp: Date.now(),
       };
+      lastPositionTimestampRef.current = payload.timestamp;
       setCurrentPosition(position);
 
-      const movementResult: TripPositionResult = await sendTripPosition(tripId, payload);
+      const movementResult: TripPositionResult = await sendTripPosition(activeTripId, payload);
       if (movementResult.ignored) {
+        logDebug('position_ignored', {
+          reason: movementResult.reason ?? 'unknown',
+        });
         return;
       }
 
@@ -337,8 +439,13 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       setNextAction(movementResult.nextAction);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send position');
+      logDebug('position_send_failed', {
+        message: err instanceof Error ? err.message : 'unknown_error',
+      });
+    } finally {
+      positionInFlightRef.current = false;
     }
-  }, [input, tripId]);
+  }, [input, logDebug]);
 
   const startPositionLoop = useCallback(() => {
     clearPositionTimer();
@@ -347,15 +454,26 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
     positionTimerRef.current = setInterval(() => {
       void sendPositionTick();
     }, intervalMs);
-  }, [clearPositionTimer, sendPositionTick]);
+    updateActiveLoopCount();
+    logDebug('position_loop_started', {
+      intervalMs,
+      appState: appStateRef.current,
+    });
+  }, [clearPositionTimer, logDebug, sendPositionTick, updateActiveLoopCount]);
 
   const stop = useCallback(() => {
+    sessionGenerationRef.current += 1;
+    isRunningRef.current = false;
     setIsRunning(false);
     startRequestedRef.current = false;
     clearPositionTimer();
     clearReconnectTimer();
     closeEventSource();
-  }, [clearPositionTimer, clearReconnectTimer, closeEventSource]);
+    setIsConnectingSse(false);
+    reconnectAttemptRef.current = 0;
+    positionInFlightRef.current = false;
+    logDebug('tracking_stopped');
+  }, [clearPositionTimer, clearReconnectTimer, closeEventSource, logDebug]);
 
   const start = useCallback(async () => {
     if (startRequestedRef.current || isRunning) {
@@ -368,7 +486,15 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
     }
 
     startRequestedRef.current = true;
+    const generation = sessionGenerationRef.current + 1;
+    sessionGenerationRef.current = generation;
     setError(null);
+    reconnectAttemptRef.current = 0;
+    lastEventIdRef.current = null;
+    lastPositionTimestampRef.current = 0;
+    logDebug('tracking_start_requested', {
+      generation,
+    });
 
     try {
       const candidates = await getRouteCandidatesWithCache({
@@ -387,6 +513,9 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       if (input.previewOnly) {
         setStatus('여유');
         startRequestedRef.current = false;
+        logDebug('tracking_preview_only', {
+          generation,
+        });
         return;
       }
 
@@ -409,19 +538,34 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
 
       setTripId(started.tripId);
       setStatus(started.status);
+      isRunningRef.current = true;
       setIsRunning(true);
+      startRequestedRef.current = false;
+      logDebug('tracking_started', {
+        generation,
+        startedTripId: started.tripId,
+      });
 
-      connectSse(started.tripId);
+      connectSse(started.tripId, generation);
       startPositionLoop();
+      void sendPositionTick();
     } catch (err) {
       startRequestedRef.current = false;
       setError(err instanceof Error ? err.message : 'Failed to start trip tracking');
+      logDebug('tracking_start_failed', {
+        generation,
+        message: err instanceof Error ? err.message : 'unknown_error',
+      });
     }
-  }, [canStart, connectSse, input, isRunning, startPositionLoop]);
+  }, [canStart, connectSse, input, isRunning, logDebug, sendPositionTick, startPositionLoop]);
 
   useEffect(() => {
     isRunningRef.current = isRunning;
   }, [isRunning]);
+
+  useEffect(() => {
+    tripIdRef.current = tripId;
+  }, [tripId]);
 
   useEffect(() => {
     appStateListenerRef.current = AppState.addEventListener('change', (nextState) => {
@@ -436,8 +580,16 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
     };
   }, [startPositionLoop]);
 
-  useEffect(() => () => {
-    stop();
+  useEffect(() => {
+    mountCountRef.current += 1;
+    return () => {
+      const isDevStrictPreCleanup =
+        process.env.NODE_ENV !== 'production' && mountCountRef.current === 1;
+      if (isDevStrictPreCleanup) {
+        return;
+      }
+      stop();
+    };
   }, [stop]);
 
   return {

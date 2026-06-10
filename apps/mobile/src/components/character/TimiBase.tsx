@@ -197,7 +197,7 @@ export function LeftArmPart({ palette, rotateDeg }: { palette: TimiPalette; rota
   const { x, y } = TIMI_TRANSFORM_ORIGIN.leftArm;
   return (
     <G id="leftArm" transform={`rotate(${rotateDeg} ${x} ${y})`}>
-      <Ellipse cx="25" cy="55" rx="7.5" ry="5.5" fill={palette.body} />
+      <Ellipse cx="24" cy="55" rx="7.5" ry="5.5" fill={palette.body} />
     </G>
   );
 }
@@ -214,7 +214,7 @@ export function RightArmPart({
   const { x, y } = TIMI_TRANSFORM_ORIGIN.rightArm;
   return (
     <G id="rightArm" transform={`translate(0 ${translateY}) rotate(${rotateDeg} ${x} ${y})`}>
-      <Ellipse cx="106" cy="55" rx="7.5" ry="5.5" fill={palette.body} />
+      <Ellipse cx="96" cy="55" rx="7.5" ry="5.5" fill={palette.body} />
     </G>
   );
 }
@@ -340,7 +340,7 @@ export function TimiBase({
   };
 
   return (
-    <Svg width={size} height={size} viewBox="0 0 120 120" fill="none">
+    <Svg width={size} height={size} viewBox="-8 0 136 120" fill="none">
       {showShadow ? (
         <Ellipse cx="60" cy="97" rx="22" ry="5" fill="#1F2A44" fillOpacity="0.08" />
       ) : null}

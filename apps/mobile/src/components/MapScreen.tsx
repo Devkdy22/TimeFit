@@ -21,7 +21,7 @@ type KakaoMapInstance = {
   setCenter: (latLng: KakaoLatLng) => void;
 };
 type KakaoMarkerInstance = {
-  setMap: (map: KakaoMapInstance) => void;
+  setMap: (map: KakaoMapInstance | null) => void;
   setPosition: (latLng: KakaoLatLng) => void;
 };
 
@@ -99,11 +99,11 @@ export function MapScreen() {
       const map = new kakao.maps.Map(container, {
         center: centerLatLng,
         level: 3,
-      });
+      }) as KakaoMapInstance;
 
       const marker = new kakao.maps.Marker({
         position: centerLatLng,
-      });
+      }) as KakaoMarkerInstance;
       marker.setMap(map);
 
       webMapRef.current = map;

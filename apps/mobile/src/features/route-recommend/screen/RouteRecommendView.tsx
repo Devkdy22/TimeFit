@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import BestIcon from '../../../../assets/icons/best.png';
 import { HomeTabBar } from '../../../components/home';
-import { TimiSvg } from '../../../components/timi';
+import { Timey, resolveTimeyState } from '../../../components/timey';
 import type { UiStatus } from '../../../theme/status-config';
 import { getTransitLineStyle } from '../model/transitLineStyle';
 import type { SelectedRouteSummary as RouteCardItem } from '../model/selectedRoute';
@@ -642,42 +642,19 @@ function BestRouteCard({
       },
     ],
   } as const;
+  const timeyState = resolveTimeyState({ bufferMinutes: item.bufferMinutes });
 
   return (
     <View style={styles.bestCardWrap}>
       <View style={styles.bestHangWrap}>
         <Animated.View style={[styles.hangingTimiClip, peekAnimStyle]}>
-          <TimiSvg
-            variant="mint"
-            pose="badge-grab"
-            width={126}
-            height={126}
-            style={styles.timiSvg}
-          />
+          <Timey state={timeyState} size={122} animated glow animationMode="static" />
         </Animated.View>
         <View style={styles.bestRibbon}>
           <Text allowFontScaling={false} style={styles.bestRibbonText}>
             BEST
           </Text>
           <Image source={BEST_ICON} style={styles.bestIconImage} />
-        </View>
-        <View pointerEvents="none" style={styles.timiHandLeft}>
-          <TimiSvg
-            variant="mint"
-            pose="badge-grab-hand-left"
-            width={34}
-            height={24}
-            handAngleDeg={-93}
-          />
-        </View>
-        <View pointerEvents="none" style={styles.timiHandRight}>
-          <TimiSvg
-            variant="mint"
-            pose="badge-grab-hand-right"
-            width={34}
-            height={24}
-            handAngleDeg={93}
-          />
         </View>
       </View>
       <Text allowFontScaling={false} style={styles.bestTitle}>
@@ -991,22 +968,6 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     marginBottom: 0,
     marginRight: 0,
-  },
-  timiSvg: {
-    marginTop: -4,
-    marginLeft: 3,
-  },
-  timiHandLeft: {
-    position: 'absolute',
-    left: 12,
-    top: 50,
-    zIndex: 40,
-  },
-  timiHandRight: {
-    position: 'absolute',
-    right: 4,
-    top: 48,
-    zIndex: 30,
   },
   notice: {
     borderRadius: 16,

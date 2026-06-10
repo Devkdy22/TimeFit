@@ -1,0 +1,274 @@
+{
+  "canvas": {
+    "width": 1024,
+    "height": 1024
+  },
+  "parts": {
+    "bodyShell": {
+      "pivot": [
+        512,
+        520
+      ]
+    },
+    "faceInset": {
+      "pivot": [
+        512,
+        512
+      ]
+    },
+    "leftEye": {
+      "pivot": [
+        448,
+        448
+      ]
+    },
+    "rightEye": {
+      "pivot": [
+        576,
+        448
+      ]
+    },
+    "mouthNeutral": {
+      "pivot": [
+        512,
+        575
+      ]
+    },
+    "mouthSmile": {
+      "pivot": [
+        512,
+        575
+      ]
+    },
+    "mouthWarning": {
+      "pivot": [
+        512,
+        586
+      ]
+    },
+    "mouthUrgent": {
+      "pivot": [
+        512,
+        590
+      ]
+    },
+    "mouthOffroute": {
+      "pivot": [
+        512,
+        590
+      ]
+    },
+    "mouthThinking": {
+      "pivot": [
+        512,
+        585
+      ]
+    },
+    "mouthSurprised": {
+      "pivot": [
+        512,
+        585
+      ]
+    },
+    "leftArm": {
+      "pivot": [
+        308,
+        585
+      ]
+    },
+    "rightArm": {
+      "pivot": [
+        716,
+        585
+      ]
+    },
+    "leftLeg": {
+      "pivot": [
+        430,
+        760
+      ]
+    },
+    "rightLeg": {
+      "pivot": [
+        594,
+        760
+      ]
+    },
+    "topButton": {
+      "pivot": [
+        512,
+        160
+      ]
+    },
+    "shadow": {
+      "pivot": [
+        512,
+        805
+      ]
+    },
+    "thinkingDots": {
+      "pivot": [
+        768,
+        295
+      ]
+    },
+    "sweatDrop": {
+      "pivot": [
+        670,
+        310
+      ]
+    },
+    "alertIcon": {
+      "pivot": [
+        782,
+        300
+      ]
+    },
+    "questionIcon": {
+      "pivot": [
+        760,
+        305
+      ]
+    },
+    "confetti": {
+      "pivot": [
+        512,
+        300
+      ]
+    }
+  },
+  "bboxes": {
+    "bodyShell": {
+      "x": 237,
+      "y": 164,
+      "w": 551,
+      "h": 561
+    },
+    "faceInset": {
+      "x": 316,
+      "y": 219,
+      "w": 393,
+      "h": 394
+    },
+    "leftEye": {
+      "x": 404,
+      "y": 374,
+      "w": 89,
+      "h": 155
+    },
+    "rightEye": {
+      "x": 531,
+      "y": 374,
+      "w": 89,
+      "h": 155
+    },
+    "mouthNeutral": {
+      "x": 463,
+      "y": 527,
+      "w": 99,
+      "h": 74
+    },
+    "mouthSmile": {
+      "x": 457,
+      "y": 524,
+      "w": 111,
+      "h": 87
+    },
+    "mouthWarning": {
+      "x": 460,
+      "y": 542,
+      "w": 105,
+      "h": 89
+    },
+    "mouthUrgent": {
+      "x": 476,
+      "y": 546,
+      "w": 73,
+      "h": 89
+    },
+    "mouthOffroute": {
+      "x": 458,
+      "y": 540,
+      "w": 109,
+      "h": 95
+    },
+    "mouthThinking": {
+      "x": 488,
+      "y": 558,
+      "w": 49,
+      "h": 53
+    },
+    "mouthSurprised": {
+      "x": 484,
+      "y": 546,
+      "w": 57,
+      "h": 77
+    },
+    "leftArm": {
+      "x": 219,
+      "y": 529,
+      "w": 176,
+      "h": 161
+    },
+    "rightArm": {
+      "x": 629,
+      "y": 529,
+      "w": 176,
+      "h": 163
+    },
+    "leftLeg": {
+      "x": 309,
+      "y": 694,
+      "w": 201,
+      "h": 156
+    },
+    "rightLeg": {
+      "x": 514,
+      "y": 694,
+      "w": 201,
+      "h": 156
+    },
+    "topButton": {
+      "x": 377,
+      "y": 75,
+      "w": 271,
+      "h": 147
+    },
+    "shadow": {
+      "x": 311,
+      "y": 744,
+      "w": 402,
+      "h": 116
+    },
+    "thinkingDots": {
+      "x": 696,
+      "y": 242,
+      "w": 145,
+      "h": 107
+    },
+    "sweatDrop": {
+      "x": 612,
+      "y": 247,
+      "w": 121,
+      "h": 120
+    },
+    "alertIcon": {
+      "x": 692,
+      "y": 217,
+      "w": 182,
+      "h": 167
+    },
+    "questionIcon": {
+      "x": 692,
+      "y": 217,
+      "w": 157,
+      "h": 177
+    },
+    "confetti": {
+      "x": 352,
+      "y": 232,
+      "w": 397,
+      "h": 137
+    }
+  }
+}

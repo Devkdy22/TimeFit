@@ -13,6 +13,11 @@ import { HeroStatusCard } from './live/HeroStatusCard';
 import { FloatingMapControls } from './live/FloatingMapControls';
 import { LiveBottomSheet } from './live/LiveBottomSheet';
 import type { LiveSheetProps, TransitLineItem } from './live/types';
+import { Timey } from '../../../components/timey';
+import type { TimeyContext, TimeyState } from '../../../domain/timey/timeyTypes';
+import { getTimeyAccessibilityLabel } from '../../../components/timey/TimeyController';
+import { trackTimeyStateChanged, trackTimeyStateShown } from '../../../domain/timey/timeyAnalytics';
+import { TIMEY_FEATURES } from '../../../config/features';
 
 export interface TransitViewProps {
   currentTime: string;
@@ -31,6 +36,8 @@ export interface TransitViewProps {
   destinationPin: MapCoordinate | null;
   routePathPoints: MapCoordinate[];
   detailLines: TransitLineItem[];
+  timeyContext: TimeyContext;
+  timeyState: TimeyState;
   onSetDetailOpen: (open: boolean) => void;
   onPressBack: () => void;
 }
@@ -41,7 +48,15 @@ function toCoordKey(point: MapCoordinate | null | undefined): string {
 }
 
 function toSegmentsKey(segments: MovingMapData['routeSegments']) {
-  return segments.map((segment) => `${segment.id}:${segment.mode}:${segment.polyline.length}`).join('|');
+  return segments
+    .map((segment) => {
+      const first = segment.polyline[0];
+      const last = segment.polyline[segment.polyline.length - 1];
+      const firstKey = first ? `${first.lat.toFixed(5)},${first.lng.toFixed(5)}` : 'none';
+      const lastKey = last ? `${last.lat.toFixed(5)},${last.lng.toFixed(5)}` : 'none';
+      return `${segment.id}:${segment.mode}:${segment.polyline.length}:${firstKey}:${lastKey}`;
+    })
+    .join('|');
 }
 
 function computePathCenter(points: MapCoordinate[]) {
@@ -75,6 +90,8 @@ export function TransitView({
   destinationPin,
   routePathPoints,
   detailLines,
+  timeyContext,
+  timeyState,
   onSetDetailOpen,
   onPressBack,
 }: TransitViewProps) {
@@ -112,6 +129,18 @@ export function TransitView({
     }),
     [arrivalTime, currentTime, detailLines, mainAction, remainingTime, stageText, status, supportText, upcomingActionSubtitle, upcomingActionTitle],
   );
+  const prevTimeyStateRef = useRef<TimeyState | null>(null);
+  const hasRealtimeSignal = timeyContext.hasRealtime !== false;
+  const liveAnimationMode = TIMEY_FEATURES.enableLiveRive ? 'auto' : 'static';
+
+  useEffect(() => {
+    trackTimeyStateShown('transit', timeyState);
+    const prev = prevTimeyStateRef.current;
+    if (prev && prev !== timeyState) {
+      trackTimeyStateChanged('transit', prev, timeyState);
+    }
+    prevTimeyStateRef.current = timeyState;
+  }, [timeyState]);
 
   useEffect(() => {
     if (isDetailOpen && sheetIndex < 1) {
@@ -166,19 +195,6 @@ export function TransitView({
     mapRef.current?.moveMarker(mapData.currentLocation);
   }, [autoFollow, mapData.currentLocation]);
 
-  const handleMapEvent = useCallback((event: KakaoMapWebViewEvent) => {
-    if (event.type === 'MAP_TAP') {
-      collapseToDefault();
-      return;
-    }
-    if (event.type !== 'MAP_READY') return;
-    mapRef.current?.setPins({ origin: originPin, destination: destinationPin });
-    if (routePathPoints.length >= 2 && mapData.routeSegments.length === 0) {
-      mapRef.current?.setRoutePath(routePathPoints);
-    }
-    mapRef.current?.setRouteSegments(mapData.routeSegments);
-  }, [collapseToDefault, destinationPin, mapData.routeSegments, originPin, routePathPoints]);
-
   const heroPanResponder = useMemo(
     () =>
       PanResponder.create({
@@ -198,6 +214,19 @@ export function TransitView({
     setStopsOpen(false);
   }, [onSetDetailOpen]);
 
+  const handleMapEvent = useCallback((event: KakaoMapWebViewEvent) => {
+    if (event.type === 'MAP_TAP') {
+      collapseToDefault();
+      return;
+    }
+    if (event.type !== 'MAP_READY') return;
+    mapRef.current?.setPins({ origin: originPin, destination: destinationPin });
+    if (routePathPoints.length >= 2 && mapData.routeSegments.length === 0) {
+      mapRef.current?.setRoutePath(routePathPoints);
+    }
+    mapRef.current?.setRouteSegments(mapData.routeSegments);
+  }, [collapseToDefault, destinationPin, mapData.routeSegments, originPin, routePathPoints]);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       {jsApiKey ? (
@@ -206,6 +235,7 @@ export function TransitView({
           jsApiKey={jsApiKey}
           initialCenter={routeCenter}
           initialMarker={mapData.currentLocation}
+          initialRouteSegments={mapData.routeSegments}
           onEvent={handleMapEvent}
           style={styles.map}
         />
@@ -221,6 +251,16 @@ export function TransitView({
 
       <View style={[styles.heroWrap, { top: heroTop }]} {...heroPanResponder.panHandlers}>
         <HeroStatusCard expanded={heroExpanded} onToggle={() => setHeroExpanded((v) => !v)} data={sheetData} />
+        <View pointerEvents="none" style={styles.timeyWrap}>
+          <Timey
+            state={timeyState}
+            size="md"
+            animated={hasRealtimeSignal}
+            glow
+            animationMode={liveAnimationMode}
+            accessibilityLabel={getTimeyAccessibilityLabel(timeyState)}
+          />
+        </View>
       </View>
 
       <FloatingMapControls
@@ -285,4 +325,5 @@ const styles = StyleSheet.create({
     zIndex: 20,
   },
   heroWrap: { position: 'absolute', left: 0, right: 0, alignItems: 'center', zIndex: 15 },
+  timeyWrap: { marginTop: 8, marginLeft: 210 },
 });

@@ -16,7 +16,7 @@ type KakaoMapInstance = {
 };
 
 type KakaoMarkerInstance = {
-  setMap: (map: KakaoMapInstance) => void;
+  setMap: (map: KakaoMapInstance | null) => void;
   setPosition: (latLng: KakaoLatLng) => void;
 };
 
@@ -69,10 +69,10 @@ export function MapWeb({ jsApiKey, center, marker }: MapWebProps) {
       const map = new kakao.maps.Map(container, {
         center: centerLatLng,
         level: 3,
-      });
+      }) as KakaoMapInstance;
       const mapMarker = new kakao.maps.Marker({
         position: new kakao.maps.LatLng(marker.lat, marker.lng),
-      });
+      }) as KakaoMarkerInstance;
       mapMarker.setMap(map);
 
       mapRef.current = map;

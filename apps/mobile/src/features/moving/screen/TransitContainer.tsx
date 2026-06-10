@@ -26,6 +26,8 @@ export function TransitContainer() {
       destinationPin={state.destinationPin}
       routePathPoints={state.routePathPoints}
       detailLines={state.detailLines}
+      timeyContext={state.timeyContext}
+      timeyState={state.timeyState}
       onSetDetailOpen={setIsDetailOpen}
       onPressBack={nav.goBack}
     />

@@ -32,6 +32,7 @@ export interface SelectedRouteSummary {
   totalDuration: string;
   totalFareText: string;
   buffer: string;
+  bufferMinutes: number;
   transportSummary: string;
   stabilityLabel: string;
   reason: string;

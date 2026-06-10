@@ -1,0 +1,79 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g id="body">
+    <ellipse cx="512" cy="828" rx="188" ry="42" fill="#1F2A44" fill-opacity="0.08"/>
+    <circle cx="512" cy="460" r="306" fill="#6ED6CD"/>
+    <circle cx="512" cy="460" r="280" fill="#E4FFFD"/>
+  </g>
+
+  <g id="leftLeg">
+    <ellipse cx="392" cy="764" rx="43" ry="51" transform="rotate(10 392 764)" fill="#5EC7BE"/>
+  </g>
+  <g id="rightLeg">
+    <ellipse cx="632" cy="764" rx="43" ry="51" transform="rotate(-10 632 764)" fill="#5EC7BE"/>
+  </g>
+
+  <g id="leftArm">
+    <rect x="174" y="472" width="128" height="77" rx="38" transform="rotate(-60 174 472)" fill="#5EC7BE"/>
+  </g>
+  <g id="rightArm">
+    <rect x="824" y="352" width="128" height="77" rx="38" transform="rotate(60 824 352)" fill="#5EC7BE"/>
+  </g>
+
+  <g id="clockMarks">
+    <rect x="503" y="154" width="18" height="80" rx="9" fill="#6ED6CD"/>
+    <rect x="503" y="679" width="18" height="80" rx="9" fill="#6ED6CD"/>
+    <rect x="819" y="452" width="18" height="80" rx="9" transform="rotate(90 819 452)" fill="#6ED6CD"/>
+    <rect x="289" y="452" width="18" height="80" rx="9" transform="rotate(90 289 452)" fill="#6ED6CD"/>
+  </g>
+
+  <g id="leftBell">
+    <path d="M368 218C332 218 302 188 302 152C302 116 332 86 368 86C404 86 434 116 434 152C434 188 404 218 368 218Z" fill="#5EC7BE"/>
+  </g>
+  <g id="rightBell">
+    <path d="M656 218C620 218 590 188 590 152C590 116 620 86 656 86C692 86 722 116 722 152C722 188 692 218 656 218Z" fill="#5EC7BE"/>
+  </g>
+  <g id="bellPins">
+    <rect x="425" y="202" width="174" height="18" rx="9" fill="#6ED6CD"/>
+  </g>
+
+  <g id="face">
+    <rect x="426" y="430" width="172" height="34" rx="17" fill="#1F2A44" opacity="0.12"/>
+  </g>
+  <g id="leftEye">
+    <ellipse cx="410" cy="392" rx="26" ry="34" fill="#1F2A44"/>
+  </g>
+  <g id="rightEye">
+    <ellipse cx="614" cy="392" rx="26" ry="34" fill="#1F2A44"/>
+  </g>
+  <g id="mouth">
+    <rect x="426" y="452" width="172" height="34" rx="17" fill="#1F2A44"/>
+  </g>
+
+  <g id="cheekLeft">
+    <ellipse cx="356" cy="474" rx="28" ry="16" fill="#F6C6C6" opacity="0.18"/>
+  </g>
+  <g id="cheekRight">
+    <ellipse cx="668" cy="474" rx="28" ry="16" fill="#F6C6C6" opacity="0.18"/>
+  </g>
+
+  <g id="sweat" opacity="0">
+    <path d="M706 332C706 352 690 368 670 368C650 368 634 352 634 332C634 308 655 284 670 268C686 284 706 308 706 332Z" fill="#7EC9FF"/>
+  </g>
+
+  <g id="questionMark" opacity="0">
+    <path d="M746 264C746 227 719 198 676 198C640 198 613 220 607 252H644C648 236 659 228 674 228C691 228 702 239 702 254C702 269 691 276 677 283C654 294 643 306 643 332V338H680V334C680 322 685 316 700 308C724 295 746 281 746 264ZM678 390C694 390 707 378 707 362C707 346 694 334 678 334C662 334 649 346 649 362C649 378 662 390 678 390Z" fill="#1F2A44"/>
+  </g>
+
+  <g id="alertIcon" opacity="0">
+    <circle cx="746" cy="270" r="54" fill="#FF6B6B"/>
+    <rect x="739" y="238" width="14" height="46" rx="7" fill="white"/>
+    <circle cx="746" cy="301" r="8" fill="white"/>
+  </g>
+
+  <g id="confetti" opacity="0">
+    <rect x="312" y="240" width="18" height="52" rx="9" transform="rotate(-30 312 240)" fill="#58C7C2"/>
+    <rect x="372" y="198" width="18" height="52" rx="9" transform="rotate(22 372 198)" fill="#F59E0B"/>
+    <rect x="634" y="196" width="18" height="52" rx="9" transform="rotate(-14 634 196)" fill="#EF4444"/>
+    <rect x="700" y="246" width="18" height="52" rx="9" transform="rotate(18 700 246)" fill="#2BB673"/>
+  </g>
+</svg>

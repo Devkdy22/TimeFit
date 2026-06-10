@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
@@ -16,7 +17,9 @@ export function StopsAccordion({ data, open, onToggle }: Props) {
   const visible = data.detailLines;
   const progress = visible.length <= 1 ? 0 : Math.max(0, Math.min(1, currentIndex / (visible.length - 1)));
   const pulse = useSharedValue(0.2);
-  pulse.value = withRepeat(withTiming(1, { duration: 1200 }), -1, true);
+  useEffect(() => {
+    pulse.value = withRepeat(withTiming(1, { duration: 1200 }), -1, true);
+  }, [pulse]);
   const pulseStyle = useAnimatedStyle(() => ({
     opacity: pulse.value * 0.45,
     transform: [{ scale: 1 + pulse.value * 0.34 }],

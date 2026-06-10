@@ -1,4 +1,4 @@
-import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import type { LayoutChangeEvent, StyleProp, ViewStyle } from 'react-native';
 import { StyleSheet, View } from 'react-native';
 import {
@@ -77,10 +77,15 @@ function buildSetPinsScript(pins: { origin?: MapCoordinate | null; destination?:
 }
 
 export const KakaoMapWebView = forwardRef<KakaoMapWebViewHandle, KakaoMapWebViewProps>(
-  function KakaoMapWebView({ jsApiKey, initialCenter, initialMarker, style, onEvent }, ref) {
+  function KakaoMapWebView(
+    { jsApiKey, initialCenter, initialMarker, initialRouteSegments, onMapReady, style, onEvent },
+    ref,
+  ) {
     const webViewRef = useRef<WebView>(null);
     const initialCenterRef = useRef(initialCenter);
     const initialMarkerRef = useRef(initialMarker);
+    const pendingSegmentsRef = useRef<MapRouteSegment[] | null>(null);
+    const isMapReadyRef = useRef(false);
 
     const html = useMemo(
       () =>
@@ -91,6 +96,22 @@ export const KakaoMapWebView = forwardRef<KakaoMapWebViewHandle, KakaoMapWebView
         }),
       [jsApiKey],
     );
+
+    const sendSegmentsToMap = useCallback((segments: MapRouteSegment[]) => {
+      if (isMapReadyRef.current) {
+        console.log('[KakaoMapWebView][SEGMENTS_SENT_IMMEDIATE]', {
+          count: segments.length,
+          at: Date.now(),
+        });
+        webViewRef.current?.injectJavaScript(buildSetRouteSegmentsScript(segments));
+        return;
+      }
+      console.log('[KakaoMapWebView][SEGMENTS_QUEUED]', {
+        count: segments.length,
+        at: Date.now(),
+      });
+      pendingSegmentsRef.current = segments;
+    }, []);
 
     useImperativeHandle(
       ref,
@@ -108,7 +129,7 @@ export const KakaoMapWebView = forwardRef<KakaoMapWebViewHandle, KakaoMapWebView
           webViewRef.current?.injectJavaScript(buildSetRoutePathScript(points));
         },
         setRouteSegments(segments: MapRouteSegment[]) {
-          webViewRef.current?.injectJavaScript(buildSetRouteSegmentsScript(segments));
+          sendSegmentsToMap(segments);
         },
         setTraveledPath(points: MapCoordinate[]) {
           webViewRef.current?.injectJavaScript(buildSetTraveledPathScript(points));
@@ -117,7 +138,7 @@ export const KakaoMapWebView = forwardRef<KakaoMapWebViewHandle, KakaoMapWebView
           webViewRef.current?.injectJavaScript(buildSetPinsScript(pins));
         },
       }),
-      [],
+      [sendSegmentsToMap],
     );
 
     const handleMessage = useCallback(
@@ -126,10 +147,33 @@ export const KakaoMapWebView = forwardRef<KakaoMapWebViewHandle, KakaoMapWebView
         if (!parsed) {
           return;
         }
+        if (parsed.type === 'MAP_READY') {
+          const readyAt = Date.now();
+          console.log('[KakaoMapWebView][MAP_READY]', {
+            at: readyAt,
+            hasPending: Boolean(pendingSegmentsRef.current?.length),
+          });
+          isMapReadyRef.current = true;
+          if (pendingSegmentsRef.current) {
+            console.log('[KakaoMapWebView][SEGMENTS_FLUSH_ON_READY]', {
+              count: pendingSegmentsRef.current.length,
+              at: readyAt,
+            });
+            webViewRef.current?.injectJavaScript(buildSetRouteSegmentsScript(pendingSegmentsRef.current));
+            pendingSegmentsRef.current = null;
+          }
+          onMapReady?.();
+        }
         onEvent?.(parsed);
       },
-      [onEvent],
+      [onEvent, onMapReady],
     );
+
+    useEffect(() => {
+      if (initialRouteSegments?.length) {
+        sendSegmentsToMap(initialRouteSegments);
+      }
+    }, [initialRouteSegments, sendSegmentsToMap]);
 
     const handleLayout = useCallback((event: LayoutChangeEvent) => {
       void event;

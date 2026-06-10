@@ -31,7 +31,7 @@ export function LiveBottomSheet({
   topInset = 0,
   onExpandFromSummary,
 }: Props) {
-  const snapPoints = useMemo(() => ['30%', '58%', '88%'], []);
+  const snapPoints = useMemo(() => ['38%', '60%', '88%'], []);
 
   return (
     <BottomSheet

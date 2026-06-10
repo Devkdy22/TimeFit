@@ -1,3 +1,4 @@
+import { useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
@@ -11,20 +12,31 @@ export function QuickTransitSummary({ data }: { data: LiveSheetProps }) {
   const progress = data.detailLines.length <= 1 ? 0 : Math.max(0, Math.min(1, currentIndex / (data.detailLines.length - 1)));
   const nextLine = data.detailLines[Math.min(data.detailLines.length - 1, currentIndex + 1)];
   const nextStop = nextLine?.stopName ?? data.upcomingActionSubtitle;
-  const directionHint = data.upcomingActionSubtitle?.trim() ? ` · ${data.upcomingActionSubtitle}` : '';
+  const nextStopLabel = nextStop && !nextStop.endsWith('역') ? `${nextStop}역` : (nextStop || '-');
+  const cleanLineLabel = (nextLine?.lineLabel ?? '').replace(/^수도권\s*/g, '').trim();
+  const boardingHintMatch = `${data.upcomingActionSubtitle ?? ''}`.match(/(\d+번\s*(?:출구|탑승|승강장))/);
+  const boardingHint = boardingHintMatch?.[1] ?? null;
   const pulse = useSharedValue(0.2);
-  pulse.value = withRepeat(withTiming(1, { duration: 1200 }), -1, true);
+  useEffect(() => {
+    pulse.value = withRepeat(withTiming(1, { duration: 1200 }), -1, true);
+  }, [pulse]);
   const pulseStyle = useAnimatedStyle(() => ({
     opacity: pulse.value * 0.45,
     transform: [{ scale: 1 + pulse.value * 0.4 }],
   }));
-  const nextGuide = nextLine
-    ? nextLine.mode === 'bus'
-      ? `다음 행동: ${nextLine.stopName} 정류장에서 ${nextLine.lineLabel} 버스 탑승${directionHint}`
-      : nextLine.mode === 'subway'
-        ? `다음 행동: ${nextLine.stopName}역에서 ${nextLine.lineLabel} 탑승${directionHint}`
-        : `다음 행동: ${nextLine.stopName}까지 도보 이동`
-    : `다음 행동: ${data.upcomingActionTitle} · ${data.upcomingActionSubtitle}`;
+  const upcomingSteps = data.detailLines
+    .slice(currentIndex + 1)
+    .filter((line, index, arr) => {
+      if (index === 0) return true;
+      const prev = arr[index - 1];
+      return !(prev.mode === line.mode && prev.lineLabel === line.lineLabel && prev.stopName === line.stopName);
+    })
+    .slice(0, 3)
+    .map((line) => {
+      if (line.mode === 'bus') return `버스 ${line.lineLabel}`;
+      if (line.mode === 'subway') return `${line.stopName}역 ${line.lineLabel.replace(/^수도권\s*/g, '').trim()}`;
+      return `도보`;
+    });
   return (
     <View style={styles.wrap}>
       <View style={styles.topRow}>
@@ -86,19 +98,28 @@ export function QuickTransitSummary({ data }: { data: LiveSheetProps }) {
         </View>
       </View>
       <View style={styles.nextGuideCard}>
-        <View style={styles.nextGuideRow}>
-          <Ionicons
-            name={
-              nextLine?.mode === 'bus'
-                ? 'bus-outline'
-                : nextLine?.mode === 'subway'
-                  ? 'train-outline'
-                  : 'walk-outline'
-            }
-            size={14}
-            color="#0E2C2C"
-          />
-          <Text style={styles.guide} numberOfLines={2}>{nextGuide}</Text>
+        <Text style={styles.planTitle}>다음 행동 순서</Text>
+        {nextLine?.mode === 'subway' ? (
+          <Text style={styles.subwayGuide} numberOfLines={2}>
+            {nextStopLabel}에서 {cleanLineLabel || '지하철'} 탑승
+            {boardingHint ? ` · ${boardingHint} 이용 시 환승/하차 동선 유리` : ''}
+          </Text>
+        ) : null}
+        <View style={styles.planRow}>
+          {upcomingSteps.length > 0 ? (
+            upcomingSteps.map((step, index) => (
+              <View key={`${step}-${index}`} style={styles.stepWrap}>
+                <View style={styles.stepChip}>
+                  <Text style={styles.stepText}>{step}</Text>
+                </View>
+                {index < upcomingSteps.length - 1 ? <Ionicons name="chevron-forward" size={13} color="#0E2C2C" /> : null}
+              </View>
+            ))
+          ) : (
+            <Text style={styles.guide} numberOfLines={1}>
+              {data.upcomingActionTitle} {data.upcomingActionSubtitle}
+            </Text>
+          )}
         </View>
       </View>
       {data.status === 'urgent' ? (
@@ -112,16 +133,16 @@ export function QuickTransitSummary({ data }: { data: LiveSheetProps }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { minHeight: 154, paddingHorizontal: 16, paddingBottom: 14, gap: 7 },
+  wrap: { minHeight: 166, paddingHorizontal: 16, paddingBottom: 14, gap: 6 },
   topRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   modeBadge: { borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4 },
   modeBadgeText: { color: '#fff', fontFamily: 'Pretendard-Bold', fontSize: 11 },
   statusChip: { marginLeft: 'auto', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   statusChipText: { fontFamily: 'Pretendard-SemiBold', fontSize: 11 },
   title: { fontFamily: 'Pretendard-ExtraBold', fontSize: 19, color: '#0F172A', flexShrink: 1 },
-  sub: { fontFamily: 'Pretendard-Medium', fontSize: 14, color: '#475569' },
+  sub: { fontFamily: 'Pretendard-Medium', fontSize: 13, color: '#475569', lineHeight: 18 },
   guide: { fontFamily: 'Pretendard-SemiBold', fontSize: 12, color: '#0E2C2C', lineHeight: 17 },
-  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  metaRow: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 16 },
   metaDot: { fontFamily: 'Pretendard-SemiBold', fontSize: 12, color: '#94A3B8' },
   metaText: { fontFamily: 'Pretendard-Medium', fontSize: 12, color: '#64748B' },
   nextGuideCard: {
@@ -131,9 +152,15 @@ const styles = StyleSheet.create({
     borderColor: '#58C7C2',
     paddingHorizontal: 10,
     paddingVertical: 8,
+    marginTop: 2,
   },
-  nextGuideRow: { flexDirection: 'row', gap: 6, alignItems: 'center' },
-  bottomRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between' },
+  planTitle: { fontFamily: 'Pretendard-SemiBold', fontSize: 11, color: '#0E2C2C' },
+  planRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 5 },
+  stepWrap: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  stepChip: { borderRadius: 999, backgroundColor: '#D8F1EF', paddingHorizontal: 8, paddingVertical: 4 },
+  stepText: { fontFamily: 'Pretendard-SemiBold', fontSize: 11, color: '#0E2C2C' },
+  subwayGuide: { fontFamily: 'Pretendard-SemiBold', fontSize: 12, color: '#0E2C2C', marginTop: 4, lineHeight: 17 },
+  bottomRow: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', minHeight: 22 },
   eta: { fontFamily: 'Pretendard-Bold', fontSize: 18 },
   remainMeta: { fontFamily: 'Pretendard-SemiBold', fontSize: 13, color: '#475569' },
   routeBarWrap: { height: 24, justifyContent: 'center', position: 'relative', marginTop: 2, width: '100%', overflow: 'visible' },

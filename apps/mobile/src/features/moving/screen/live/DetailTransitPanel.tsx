@@ -17,7 +17,6 @@ export function DetailTransitPanel({ data }: { data: LiveSheetProps }) {
       bounces={false}
       overScrollMode="never"
       keyboardShouldPersistTaps="handled"
-      scrollEventThrottle={16}
     >
       <CurrentSegmentCard data={data} />
       <LiveTimeline data={data} />

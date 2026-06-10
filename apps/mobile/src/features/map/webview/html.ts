@@ -198,10 +198,12 @@ export function buildKakaoMapHtml({
 
         function styleBySegment(segment) {
           var isWalk = segment && segment.mode === 'WALK';
+          var isSubway = segment && segment.mode === 'SUBWAY';
+          var isBus = segment && segment.mode === 'BUS';
           return {
             color: (segment && segment.color) || (isWalk ? '#8A8F98' : '#2D7FF9'),
-            outerWeight: 11,
-            innerWeight: 7,
+            outerWeight: isWalk ? 0 : (isSubway ? 8 : (isBus ? 10 : 11)),
+            innerWeight: isWalk ? 7 : (isSubway ? 5 : (isBus ? 6 : 7)),
             innerStyle: isWalk ? 'shortdot' : 'solid',
             zIndex: segment && typeof segment.zIndex === 'number' ? segment.zIndex : (isWalk ? 20 : 30),
           };
@@ -597,6 +599,7 @@ export function buildKakaoMapHtml({
               center: center,
               level: 3,
             });
+            post('MAP_READY');
             if (map.setZoomable) {
               map.setZoomable(true);
             }
@@ -737,7 +740,7 @@ export function buildKakaoMapHtml({
                   path: latLngPath,
                   strokeWeight: style.innerWeight,
                   strokeColor: style.color,
-                  strokeOpacity: isWalkSegment ? 0 : 1,
+                  strokeOpacity: isWalkSegment ? 0.7 : 1,
                   strokeStyle: style.innerStyle,
                   zIndex: style.zIndex + 1,
                 });
@@ -790,6 +793,8 @@ export function buildKakaoMapHtml({
               } else {
                 routeBounds = null;
               }
+              userInteractedViewport = false;
+              fitMapToRoute(true);
             };
 
             window.setFitPaddingBottom = function (paddingBottom) {
@@ -927,7 +932,6 @@ export function buildKakaoMapHtml({
                 lng: ${initialCenter.lng},
               },
             });
-            post('MAP_READY');
           } catch (error) {
             post('MAP_ERROR', {
               message: String(error && error.message ? error.message : error),

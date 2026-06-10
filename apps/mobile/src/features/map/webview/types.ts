@@ -26,6 +26,8 @@ export interface KakaoMapWebViewProps {
   jsApiKey: string;
   initialCenter: MapCoordinate;
   initialMarker?: MapCoordinate;
+  initialRouteSegments?: MapRouteSegment[];
+  onMapReady?: () => void;
   style?: StyleProp<ViewStyle>;
   onEvent?: (event: KakaoMapWebViewEvent) => void;
 }

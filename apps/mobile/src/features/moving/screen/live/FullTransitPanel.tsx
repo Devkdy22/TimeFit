@@ -25,7 +25,6 @@ export function FullTransitPanel({ data, stopsOpen, onToggleStops, bottomPadding
       bounces={false}
       overScrollMode="never"
       keyboardShouldPersistTaps="handled"
-      scrollEventThrottle={16}
     >
       <CurrentSegmentCard data={data} />
       <StopsAccordion data={data} open={stopsOpen} onToggle={onToggleStops} />

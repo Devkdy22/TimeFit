@@ -25,6 +25,6 @@ export const TIMI_PART_DEFAULT_TRANSFORMS: TimiPartTransforms = {
 export const TIMI_TRANSFORM_ORIGIN = {
   head: { x: 60, y: 58 },
   eyes: { x: 60, y: 46 },
-  leftArm: { x: 42, y: 74 },
-  rightArm: { x: 78, y: 74 },
+  leftArm: { x: 24, y: 55 },
+  rightArm: { x: 96, y: 55 },
 } as const;

@@ -11,12 +11,24 @@ import {
   type RecommendLocation,
 } from '../../../services/api/client';
 import {
+  buildRouteSegments as buildResolvedRouteSegments,
+  type RawRoute,
+} from '../../../utils/buildRouteSegments';
+import { buildImmediateFallbackAll } from '../../../utils/buildRouteSegmentsFallback';
+import {
   fetchSeoulBusRoutePathGeometry,
+  fetchSeoulBusRouteIdsByRouteNo,
   fetchSeoulStationsByRoute,
   type SeoulBusStation,
 } from '../../../services/seoulBusApi';
 import { getTransitLineStyle } from '../../route-recommend/model/transitLineStyle';
 import { subwayColors, subwayLineGeometry } from '../../../data/subwayLineGeometry';
+import { sliceSubwayLine } from '../../../data/subwayLineUtils';
+import { selectTimeyContextFromTrip } from '../../../domain/timey/timeySelectors';
+import { resolveTimeyStateMachine } from '../../../domain/timey/timeyStateMachine';
+import { advanceStableTimeySnapshot } from '../../../domain/timey/timeyTransitionGuard';
+import type { TimeyContext, TimeyTransitionSnapshot } from '../../../domain/timey/timeyTypes';
+import { shouldAutoStartTracking } from './autoStartGuard';
 
 interface TransitLineItem {
   id: string;
@@ -115,6 +127,21 @@ interface BusRouteGeometryPayload {
   polyline: MapCoordinate[];
   stations: SeoulBusStation[];
 }
+type ConfidenceLevel = 'high' | 'medium' | 'low';
+interface BusStationAnchorResolution {
+  startStation?: SeoulBusStation;
+  endStation?: SeoulBusStation;
+  confidence: ConfidenceLevel;
+  reason: string;
+}
+interface DirectionalSliceResult {
+  points: MapCoordinate[];
+  startIndex: number;
+  endIndex: number;
+  confidence: ConfidenceLevel;
+  score: number;
+  reason: string;
+}
 
 const routeCache = new Map<string, BusRouteGeometryPayload>();
 const routeInFlight = new Map<string, Promise<BusRouteGeometryPayload | null>>();
@@ -198,7 +225,206 @@ function findClosestIndex(polyline: MapCoordinate[], target: MapCoordinate) {
   return index;
 }
 
+function densifyPolyline(points: MapCoordinate[], maxStepMeters = 80): MapCoordinate[] {
+  if (points.length < 2) return points;
+  const out: MapCoordinate[] = [points[0]];
+  for (let i = 1; i < points.length; i += 1) {
+    const a = points[i - 1];
+    const b = points[i];
+    const dist = toMeters(a, b);
+    if (!Number.isFinite(dist) || dist <= maxStepMeters) {
+      out.push(b);
+      continue;
+    }
+    const steps = Math.min(16, Math.floor(dist / maxStepMeters));
+    for (let k = 1; k <= steps; k += 1) {
+      const t = k / (steps + 1);
+      out.push({
+        lat: a.lat + (b.lat - a.lat) * t,
+        lng: a.lng + (b.lng - a.lng) * t,
+      });
+    }
+    out.push(b);
+  }
+  return normalizePathPoints(out);
+}
+
+function kNearestPolylineIndices(polyline: MapCoordinate[], target: MapCoordinate, k = 6) {
+  const ranked = polyline
+    .map((point, index) => ({
+      index,
+      dist: (point.lat - target.lat) * (point.lat - target.lat) + (point.lng - target.lng) * (point.lng - target.lng),
+    }))
+    .sort((a, b) => a.dist - b.dist);
+  return ranked.slice(0, Math.max(1, k));
+}
+
+function polylineLengthMeters(points: MapCoordinate[]) {
+  let total = 0;
+  for (let i = 1; i < points.length; i += 1) {
+    total += toMeters(points[i - 1], points[i]);
+  }
+  return total;
+}
+
+function distanceToPolylineMeters(polyline: MapCoordinate[], target: MapCoordinate) {
+  if (polyline.length === 0) return Number.POSITIVE_INFINITY;
+  let best = Number.POSITIVE_INFINITY;
+  for (const point of polyline) {
+    best = Math.min(best, toMeters(point, target));
+  }
+  return best;
+}
+
+function chooseDirectionalAnchorSlice(
+  polyline: MapCoordinate[],
+  anchors: MapCoordinate[],
+): DirectionalSliceResult | null {
+  if (polyline.length < 2 || anchors.length < 2) return null;
+  const nearestByAnchor = anchors.map((anchor) => kNearestPolylineIndices(polyline, anchor, 8));
+  if (nearestByAnchor.some((cands) => cands.length === 0)) return null;
+
+  type PathCandidate = { indices: number[]; score: number };
+  let candidates: PathCandidate[] = nearestByAnchor[0].map((first) => ({
+    indices: [first.index],
+    score: Math.sqrt(first.dist) * 111000,
+  }));
+
+  for (let ai = 1; ai < nearestByAnchor.length; ai += 1) {
+    const nextCands = nearestByAnchor[ai];
+    const nextPaths: PathCandidate[] = [];
+    for (const base of candidates) {
+      const prevIdx = base.indices[base.indices.length - 1];
+      const prevAnchor = anchors[ai - 1];
+      const nowAnchor = anchors[ai];
+      const directDistance = Math.max(1, toMeters(prevAnchor, nowAnchor));
+      for (const cand of nextCands) {
+        if (cand.index < prevIdx) continue;
+        const spanStart = Math.min(prevIdx, cand.index);
+        const spanEnd = Math.max(prevIdx, cand.index);
+        const spanPoints = polyline.slice(spanStart, spanEnd + 1);
+        const segmentDistance = Math.max(1, polylineLengthMeters(spanPoints));
+        const ratio = segmentDistance / directDistance;
+        const anchorDistanceMeters = Math.sqrt(cand.dist) * 111000;
+        let penalty = 0;
+        if (ratio > 5) penalty += (ratio - 5) * 150;
+        if (cand.index === prevIdx) penalty += 150;
+        if (cand.index - prevIdx <= 1) penalty += 40;
+        if (anchorDistanceMeters > 300) penalty += 300 + (anchorDistanceMeters - 300) * 0.5;
+        nextPaths.push({
+          indices: [...base.indices, cand.index],
+          score: base.score + anchorDistanceMeters + segmentDistance * 0.03 + penalty,
+        });
+      }
+    }
+    if (nextPaths.length === 0) return null;
+    nextPaths.sort((a, b) => a.score - b.score);
+    candidates = nextPaths.slice(0, 18);
+  }
+
+  const best = candidates[0];
+  if (!best || best.indices.length < 2) return null;
+  const rawStart = best.indices[0];
+  const rawEnd = best.indices[best.indices.length - 1];
+  if (rawStart === rawEnd) return null;
+  const startIndex = Math.min(rawStart, rawEnd);
+  const endIndex = Math.max(rawStart, rawEnd);
+  const points = rawStart <= rawEnd ? polyline.slice(startIndex, endIndex + 1) : polyline.slice(startIndex, endIndex + 1).reverse();
+  const avgAnchorDistance = anchors.reduce((sum, anchor) => sum + distanceToPolylineMeters(points, anchor), 0) / anchors.length;
+  const confidence: ConfidenceLevel = best.score > 6000 || avgAnchorDistance > 250 ? 'low' : best.score > 2500 ? 'medium' : 'high';
+  return {
+    points,
+    startIndex,
+    endIndex,
+    confidence,
+    score: best.score,
+    reason: confidence === 'high' ? 'directional-anchor-fit' : confidence === 'medium' ? 'usable-but-noisy' : 'ratio-or-distance-penalty',
+  };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function chooseMonotonicAnchorSlice(polyline: MapCoordinate[], anchors: MapCoordinate[]): MapCoordinate[] | null {
+  const result = chooseDirectionalAnchorSlice(polyline, anchors);
+  if (!result || result.confidence === 'low') return null;
+  return result.points;
+}
+
+function findClosestIndexInRange(
+  polyline: MapCoordinate[],
+  target: MapCoordinate,
+  from: number,
+  to: number,
+) {
+  let minDist = Number.POSITIVE_INFINITY;
+  let index = from;
+  for (let i = from; i <= to; i += 1) {
+    const p = polyline[i];
+    const d = (p.lat - target.lat) * (p.lat - target.lat) + (p.lng - target.lng) * (p.lng - target.lng);
+    if (d < minDist) {
+      minDist = d;
+      index = i;
+    }
+  }
+  return { index, dist: minDist };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function slicePolylineByWaypointAnchors(polyline: MapCoordinate[], anchors: MapCoordinate[]): MapCoordinate[] {
+  if (polyline.length < 2 || anchors.length < 2) return polyline;
+
+  const forwardIdx: number[] = [];
+  let cursor = 0;
+  let forwardScore = 0;
+  for (const anchor of anchors) {
+    const { index, dist } = findClosestIndexInRange(polyline, anchor, cursor, polyline.length - 1);
+    forwardIdx.push(index);
+    forwardScore += dist;
+    cursor = index;
+  }
+
+  const backwardIdxDesc: number[] = [];
+  cursor = polyline.length - 1;
+  let backwardScore = 0;
+  for (let i = anchors.length - 1; i >= 0; i -= 1) {
+    const anchor = anchors[i];
+    const { index, dist } = findClosestIndexInRange(polyline, anchor, 0, cursor);
+    backwardIdxDesc.push(index);
+    backwardScore += dist;
+    cursor = index;
+  }
+  const backwardIdx = backwardIdxDesc.reverse();
+
+  const chosen = forwardScore <= backwardScore ? forwardIdx : backwardIdx;
+  const start = chosen[0];
+  const end = chosen[chosen.length - 1];
+  if (start <= end) return polyline.slice(start, end + 1);
+  return polyline.slice(end, start + 1).reverse();
+}
+
 async function resolveWalkGeometry(segment: TrackingSegment) {
+  const waypoints = normalizePathPoints([
+    ...(segment.pathPoints?.map((point) => ({ lat: point.lat, lng: point.lng })) ?? []),
+    ...(typeof segment.startLat === 'number' && typeof segment.startLng === 'number'
+      ? [{ lat: segment.startLat, lng: segment.startLng }]
+      : []),
+    ...(typeof segment.endLat === 'number' && typeof segment.endLng === 'number'
+      ? [{ lat: segment.endLat, lng: segment.endLng }]
+      : []),
+  ]);
+  if (waypoints.length >= 3) {
+    try {
+      const stitched = await buildRoadPolylineFromWaypoints(waypoints, segment.lineLabel ?? 'walk');
+      if (stitched.length >= 2) {
+        return {
+          source: 'kakao-directions',
+          points: stitched,
+        } as const;
+      }
+    } catch (error) {
+      console.warn('[RouteGeometry][WALK] waypoint stitch failed', { error });
+    }
+  }
+
   if (
     typeof segment.startLat !== 'number' ||
     typeof segment.startLng !== 'number' ||
@@ -343,11 +569,147 @@ function buildSegmentFallbackPolyline(
   return buildFallbackFromSegmentPoints(segment);
 }
 
+function buildStopBasedPolyline(
+  segment: TrackingSegment,
+  previousSegment?: TrackingSegment,
+  nextSegment?: TrackingSegment,
+) {
+  const { start, end } = resolveSegmentEdgePoints(segment, previousSegment, nextSegment);
+  return normalizePathPoints([
+    ...(start ? [start] : []),
+    ...(segment.pathPoints?.map((point) => ({ lat: point.lat, lng: point.lng })) ?? []),
+    ...(end ? [end] : []),
+  ]);
+}
+
+async function buildRoadPolylineFromWaypoints(points: MapCoordinate[], label?: string) {
+  const normalized = normalizePathPoints(points);
+  if (normalized.length < 2) {
+    return normalized;
+  }
+
+  const merged: MapCoordinate[] = [];
+  for (let index = 1; index < normalized.length; index += 1) {
+    const from = normalized[index - 1];
+    const to = normalized[index];
+    if (toMeters(from, to) <= 3) {
+      continue;
+    }
+
+    try {
+      const road = await fetchKakaoWalkGeometry({
+        origin: {
+          name: `${label ?? 'segment'}-${index}-from`,
+          lat: from.lat,
+          lng: from.lng,
+        } as RecommendLocation,
+        destination: {
+          name: `${label ?? 'segment'}-${index}-to`,
+          lat: to.lat,
+          lng: to.lng,
+        } as RecommendLocation,
+      });
+      const sampled = normalizePathPoints(road);
+      if (sampled.length >= 2) {
+        if (merged.length === 0) {
+          merged.push(...sampled);
+        } else {
+          merged.push(...sampled.slice(1));
+        }
+        continue;
+      }
+    } catch (error) {
+      console.warn('[RouteGeometry][ROAD_STITCH] geometry fetch failed', { error, label });
+    }
+
+    if (merged.length === 0) {
+      merged.push(from, to);
+    } else {
+      merged.push(to);
+    }
+  }
+
+  return normalizePathPoints(merged);
+}
+
+function inferSubwayPolylineByCoords(
+  start: MapCoordinate,
+  end: MapCoordinate,
+): MapCoordinate[] | null {
+  let best: { score: number; polyline: MapCoordinate[] } | null = null;
+
+  for (const stations of Object.values(subwayLineGeometry)) {
+    if (!stations || stations.length < 2) {
+      continue;
+    }
+    const line = stations.map((station) => ({ lat: station.lat, lng: station.lng }));
+    const startIdx = findClosestIndex(line, start);
+    const endIdx = findClosestIndex(line, end);
+    const nearestStart = line[startIdx];
+    const nearestEnd = line[endIdx];
+    const score = toMeters(start, nearestStart) + toMeters(end, nearestEnd);
+    const sliced =
+      startIdx <= endIdx ? line.slice(startIdx, endIdx + 1) : line.slice(endIdx, startIdx + 1).reverse();
+    if (sliced.length < 2) {
+      continue;
+    }
+    if (!best || score < best.score) {
+      best = { score, polyline: sliced };
+    }
+  }
+
+  if (!best) {
+    return null;
+  }
+
+  // 출/도착역 좌표와 노선 좌표가 너무 멀면 잘못된 추론으로 판단
+  if (best.score > 3000) {
+    return null;
+  }
+  return best.polyline;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function resolveRoadFallbackPolyline(
+  segment: TrackingSegment,
+  previousSegment?: TrackingSegment,
+  nextSegment?: TrackingSegment,
+) {
+  const { start, end } = resolveSegmentEdgePoints(segment, previousSegment, nextSegment);
+  if (!start || !end || toMeters(start, end) <= 3) {
+    return buildSegmentFallbackPolyline(segment, previousSegment, nextSegment);
+  }
+
+  try {
+    const points = await fetchKakaoWalkGeometry({
+      origin: {
+        name: segment.startName ?? segment.lineLabel ?? 'segment-start',
+        lat: start.lat,
+        lng: start.lng,
+      } as RecommendLocation,
+      destination: {
+        name: segment.endName ?? segment.lineLabel ?? 'segment-end',
+        lat: end.lat,
+        lng: end.lng,
+      } as RecommendLocation,
+    });
+    const normalized = normalizePathPoints(points);
+    if (normalized.length >= 2) {
+      return normalized;
+    }
+  } catch (error) {
+    console.warn('[RouteGeometry][ROAD_FALLBACK] geometry fetch failed', { error });
+  }
+
+  return buildSegmentFallbackPolyline(segment, previousSegment, nextSegment);
+}
+
 function normalizeStationToken(value?: string) {
   if (!value) return '';
   return value.replace(/\s+/g, '').replace(/역$/, '').trim();
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function findStationCoordinate(
   stations: SeoulBusStation[],
   stationId?: string,
@@ -368,6 +730,169 @@ function findStationCoordinate(
     return { lat: byName.lat, lng: byName.lng };
   }
   return undefined;
+}
+
+function stationSeqDirectionScore(startSeq?: number, endSeq?: number) {
+  if (!Number.isFinite(startSeq) || !Number.isFinite(endSeq)) return { valid: false, forward: false };
+  return {
+    valid: startSeq !== endSeq,
+    forward: (startSeq ?? 0) < (endSeq ?? 0),
+  };
+}
+
+function resolveBusStationAnchors(params: {
+  stations: SeoulBusStation[];
+  startStationId?: string;
+  endStationId?: string;
+  startName?: string;
+  endName?: string;
+  fallbackStart?: MapCoordinate;
+  fallbackEnd?: MapCoordinate;
+  polyline?: MapCoordinate[];
+}): BusStationAnchorResolution {
+  const { stations, startStationId, endStationId, startName, endName, fallbackStart, fallbackEnd, polyline } = params;
+  const normStartId = normalizeStationToken(startStationId);
+  const normEndId = normalizeStationToken(endStationId);
+  const byStartId = normStartId ? stations.find((s) => normalizeStationToken(s.id) === normStartId) : undefined;
+  const byEndId = normEndId ? stations.find((s) => normalizeStationToken(s.id) === normEndId) : undefined;
+  if (byStartId && byEndId) {
+    return {
+      startStation: byStartId,
+      endStation: byEndId,
+      confidence: byStartId.seq !== byEndId.seq ? 'high' : 'low',
+      reason: 'matched-by-station-id',
+    };
+  }
+
+  const startNameNorm = normalizeStationToken(startName);
+  const endNameNorm = normalizeStationToken(endName);
+  const startCandidates = stations.filter((s) => normalizeStationToken(s.name) === startNameNorm);
+  const endCandidates = stations.filter((s) => normalizeStationToken(s.name) === endNameNorm);
+  if (startCandidates.length === 0 || endCandidates.length === 0) {
+    return { startStation: byStartId, endStation: byEndId, confidence: 'low', reason: 'missing-name-candidates' };
+  }
+
+  let best: { start: SeoulBusStation; end: SeoulBusStation; score: number } | null = null;
+  for (const start of startCandidates) {
+    for (const end of endCandidates) {
+      const seqInfo = stationSeqDirectionScore(start.seq, end.seq);
+      let score = 0;
+      if (seqInfo.valid) score += 20;
+      if (seqInfo.valid && seqInfo.forward) score += 8;
+      if (fallbackStart) score += Math.max(0, 25 - toMeters(fallbackStart, { lat: start.lat, lng: start.lng }) / 20);
+      if (fallbackEnd) score += Math.max(0, 25 - toMeters(fallbackEnd, { lat: end.lat, lng: end.lng }) / 20);
+      if (polyline) {
+        score += Math.max(0, 15 - distanceToPolylineMeters(polyline, { lat: start.lat, lng: start.lng }) / 30);
+        score += Math.max(0, 15 - distanceToPolylineMeters(polyline, { lat: end.lat, lng: end.lng }) / 30);
+      }
+      if (start.seq === end.seq) score -= 35;
+      if (!best || score > best.score) best = { start, end, score };
+    }
+  }
+  if (!best) return { confidence: 'low', reason: 'no-valid-pair' };
+  const startEndDistance = toMeters({ lat: best.start.lat, lng: best.start.lng }, { lat: best.end.lat, lng: best.end.lng });
+  const confidence: ConfidenceLevel = best.score >= 55 && startEndDistance > 100 ? 'high' : best.score >= 35 ? 'medium' : 'low';
+  return { startStation: best.start, endStation: best.end, confidence, reason: 'best-name-pair' };
+}
+
+function scoreBusRouteCandidate(params: {
+  resolution: BusStationAnchorResolution;
+  fallbackStart?: MapCoordinate;
+  fallbackEnd?: MapCoordinate;
+}) {
+  const { resolution, fallbackStart, fallbackEnd } = params;
+  const start = resolution.startStation;
+  const end = resolution.endStation;
+  let score = 0;
+  if (start) score += 40;
+  if (end) score += 40;
+  const seq = stationSeqDirectionScore(start?.seq, end?.seq);
+  if (seq.valid) score += 10;
+  if (seq.valid && seq.forward) score += 10;
+  const startDist = start && fallbackStart ? toMeters(fallbackStart, { lat: start.lat, lng: start.lng }) : Number.POSITIVE_INFINITY;
+  const endDist = end && fallbackEnd ? toMeters(fallbackEnd, { lat: end.lat, lng: end.lng }) : Number.POSITIVE_INFINITY;
+  if (startDist <= 300 && endDist <= 300) score += 20;
+  if (startDist >= 500 || endDist >= 500) score -= 50;
+  if (resolution.confidence === 'low') score -= 40;
+  if (resolution.confidence === 'medium') score -= 10;
+  return { score, startDist, endDist };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function findStationByNameNearest(
+  stations: SeoulBusStation[],
+  stationName: string | undefined,
+  ref?: MapCoordinate,
+): SeoulBusStation | undefined {
+  const resolution = resolveBusStationAnchors({
+    stations,
+    startName: stationName,
+    endName: stationName,
+    fallbackStart: ref,
+    fallbackEnd: ref,
+  });
+  return resolution.startStation;
+}
+
+function sliceBusPolylineByStationSeq(
+  polyline: MapCoordinate[],
+  stations: SeoulBusStation[],
+  segment: TrackingSegment,
+  fallbackStart?: MapCoordinate,
+  fallbackEnd?: MapCoordinate,
+) {
+  const anchorResolution = resolveBusStationAnchors({
+    stations,
+    startStationId: segment.startStationId,
+    endStationId: segment.endStationId,
+    startName: segment.startName,
+    endName: segment.endName,
+    fallbackStart,
+    fallbackEnd,
+    polyline,
+  });
+  if (!anchorResolution.startStation || !anchorResolution.endStation || anchorResolution.confidence === 'low') {
+    return {
+      points: polyline,
+      startIndex: 0,
+      endIndex: polyline.length - 1,
+      confidence: 'low' as const,
+      score: Number.POSITIVE_INFINITY,
+      reason: `station-anchor-${anchorResolution.reason}`,
+      anchors: anchorResolution,
+    };
+  }
+  const startSeq = anchorResolution.startStation.seq ?? -1;
+  const endSeq = anchorResolution.endStation.seq ?? -1;
+  if (startSeq < 0 || endSeq < 0 || startSeq === endSeq) {
+    return {
+      points: polyline,
+      startIndex: 0,
+      endIndex: polyline.length - 1,
+      confidence: 'low' as const,
+      score: Number.POSITIVE_INFINITY,
+      reason: 'invalid-station-seq',
+      anchors: anchorResolution,
+    };
+  }
+  const forward = startSeq < endSeq;
+  const anchors = stations
+    .filter((station) => (station.seq ?? -1) >= Math.min(startSeq, endSeq) && (station.seq ?? -1) <= Math.max(startSeq, endSeq))
+    .sort((a, b) => (forward ? (a.seq ?? 0) - (b.seq ?? 0) : (b.seq ?? 0) - (a.seq ?? 0)))
+    .map((station) => ({ lat: station.lat, lng: station.lng }));
+  const directional = chooseDirectionalAnchorSlice(polyline, anchors);
+  if (!directional) {
+    return {
+      points: polyline,
+      startIndex: 0,
+      endIndex: polyline.length - 1,
+      confidence: 'low' as const,
+      score: Number.POSITIVE_INFINITY,
+      reason: 'directional-slice-failed',
+      anchors: anchorResolution,
+    };
+  }
+  return { ...directional, anchors: anchorResolution };
 }
 
 function resolveSubwayLineName(raw?: string) {
@@ -393,148 +918,295 @@ async function resolveBusGeometry(
   previousSegment?: TrackingSegment,
   nextSegment?: TrackingSegment,
 ) {
-  if ((segment.routeGeometry?.length ?? 0) >= 2) {
+  function buildBusFallback(source: string, reason: string) {
+    const points = buildBusFallbackPolyline(segment, previousSegment, nextSegment);
+    console.warn('[RouteGeometry][BUS][FALLBACK]', {
+      segmentId,
+      lineLabel: segment.lineLabel ?? null,
+      busRouteId: segment.busRouteId ?? null,
+      selectedRouteId: null,
+      source,
+      startName: segment.startName ?? null,
+      endName: segment.endName ?? null,
+      startStationId: segment.startStationId ?? null,
+      endStationId: segment.endStationId ?? null,
+      matchedStartStation: null,
+      matchedEndStation: null,
+      stationMatchConfidence: 'low',
+      totalPolylinePoints: 0,
+      slicedPoints: points.length,
+      startToPolylineDistanceMeters: null,
+      endToPolylineDistanceMeters: null,
+      sliceStartIndex: null,
+      sliceEndIndex: null,
+      tighteningApplied: false,
+      fallbackReason: reason,
+    });
+    return { source, points } as const;
+  }
+  function validatePathPointTightening(params: {
+    sliced: MapCoordinate[];
+    pathPoints: MapCoordinate[];
+    tightened: DirectionalSliceResult | null;
+  }) {
+    const { sliced, pathPoints, tightened } = params;
+    if (pathPoints.length < 3) return { ok: false, reason: 'pathPoints-too-few' };
+    for (const p of pathPoints) {
+      if (distanceToPolylineMeters(sliced, p) > 300) return { ok: false, reason: 'pathPoint-too-far' };
+    }
+    const indices = pathPoints.map((p) => findClosestIndex(sliced, p));
+    for (let i = 1; i < indices.length; i += 1) {
+      if (indices[i] < indices[i - 1]) return { ok: false, reason: 'pathPoints-non-monotonic' };
+    }
+    if (!tightened || tightened.confidence === 'low') return { ok: false, reason: 'tightened-low-confidence' };
+    const oldLen = polylineLengthMeters(sliced);
+    const newLen = polylineLengthMeters(tightened.points);
+    if (newLen < oldLen * 0.3) return { ok: false, reason: 'tightened-too-short' };
+    if (newLen > oldLen * 1.2) return { ok: false, reason: 'tightened-too-long' };
+    return { ok: true, reason: 'ok' };
+  }
+  function shouldUseBusRoutePath(params: {
+    routeScore: number;
+    stationConfidence: ConfidenceLevel;
+    sliceConfidence: ConfidenceLevel;
+    slicedPoints: number;
+  }) {
+    const { routeScore, stationConfidence, sliceConfidence, slicedPoints } = params;
+    return routeScore >= 50 && stationConfidence !== 'low' && sliceConfidence !== 'low' && slicedPoints >= 8;
+  }
+  function buildBusFallbackPolyline(
+    currentSegment: TrackingSegment,
+    prev?: TrackingSegment,
+    next?: TrackingSegment,
+  ) {
+    const fallbackStops = buildStopBasedPolyline(currentSegment, prev, next);
+    if (fallbackStops.length >= 2) return fallbackStops;
+    return buildSegmentFallbackPolyline(currentSegment, prev, next);
+  }
+
+  const segmentId = `${segment.mode}-${segment.lineId ?? segment.busRouteId ?? 'unknown'}-${segment.startName ?? 'start'}-${segment.endName ?? 'end'}`;
+  const edge = resolveSegmentEdgePoints(segment, previousSegment, nextSegment);
+  if ((segment.routeGeometry?.length ?? 0) >= 20) {
+    console.log('[RouteGeometry][BUS][MATCH]', {
+      segmentId,
+      lineLabel: segment.lineLabel ?? null,
+      busRouteId: segment.busRouteId ?? null,
+      selectedRouteId: null,
+      source: 'route-geometry',
+      startName: segment.startName ?? null,
+      endName: segment.endName ?? null,
+      startStationId: segment.startStationId ?? null,
+      endStationId: segment.endStationId ?? null,
+      stationMatchConfidence: 'high',
+      totalPolylinePoints: segment.routeGeometry?.length ?? 0,
+      slicedPoints: segment.routeGeometry?.length ?? 0,
+      startToPolylineDistanceMeters: null,
+      endToPolylineDistanceMeters: null,
+      sliceStartIndex: null,
+      sliceEndIndex: null,
+      tighteningApplied: false,
+      fallbackReason: null,
+    });
     return {
       source: 'route-geometry',
       points: normalizePathPoints(segment.routeGeometry ?? []),
     } as const;
   }
 
-  const segmentId = `${segment.mode}-${segment.lineId ?? segment.busRouteId ?? 'unknown'}-${segment.startName ?? 'start'}-${segment.endName ?? 'end'}`;
   if (!segment.busRouteId) {
-    console.warn('[RouteGeometry][BUS][FALLBACK_PASS_STOPS]', {
-      segmentId,
-      busRouteId: null,
-    });
-    return {
-      source: 'passStops-fallback',
-      points: buildSegmentFallbackPolyline(segment, previousSegment, nextSegment),
-    } as const;
+    return buildBusFallback('passStops-fallback', 'missing-busRouteId');
   }
 
-  const payload = await fetchBusRouteGeometry(segment.busRouteId);
-  if (!payload || payload.polyline.length < 10) {
-    console.warn('[RouteGeometry][BUS][FALLBACK_PASS_STOPS]', {
-      segmentId,
-      busRouteId: segment.busRouteId,
-    });
-    return {
-      source: 'passStops-fallback',
-      points: buildSegmentFallbackPolyline(segment, previousSegment, nextSegment),
-    } as const;
-  }
-
-  const fallbackEdge = resolveSegmentEdgePoints(segment, previousSegment, nextSegment);
-  const startStop =
-    findStationCoordinate(payload.stations, segment.startStationId, segment.startName) ?? fallbackEdge.start;
-  const endStop =
-    findStationCoordinate(payload.stations, segment.endStationId, segment.endName) ?? fallbackEdge.end;
-  const polyline = payload.polyline;
-  let sliced = polyline;
-  if (startStop && endStop) {
-    const startIdx = findClosestIndex(polyline, startStop);
-    const endIdx = findClosestIndex(polyline, endStop);
-    if (startIdx < endIdx) {
-      sliced = polyline.slice(startIdx, endIdx + 1);
-    } else {
-      sliced = polyline.slice(endIdx, startIdx + 1).reverse();
+  const candidateIds = [segment.busRouteId];
+  if (segment.lineLabel) {
+    try {
+      const inferredIds = await fetchSeoulBusRouteIdsByRouteNo(segment.lineLabel);
+      for (const id of inferredIds) if (!candidateIds.includes(id)) candidateIds.push(id);
+    } catch (error) {
+      console.warn('[RouteGeometry][BUS] route id lookup failed', { lineLabel: segment.lineLabel, error });
     }
   }
 
-  console.log('[RouteGeometry][BUS]', {
-    segmentId,
-    busRouteId: segment.busRouteId,
-    source: 'routePathList',
-    totalPoints: polyline.length,
+  let selectedRouteId: string | null = null;
+  let selectedPayload: BusRouteGeometryPayload | null = null;
+  let selectedAnchor: BusStationAnchorResolution | null = null;
+  let selectedRouteScore = -9999;
+  for (const candidateId of candidateIds.slice(0, 8)) {
+    const payload = await fetchBusRouteGeometry(candidateId);
+    if (!payload || payload.polyline.length < 10) continue;
+    const anchor = resolveBusStationAnchors({
+      stations: payload.stations,
+      startStationId: segment.startStationId,
+      endStationId: segment.endStationId,
+      startName: segment.startName,
+      endName: segment.endName,
+      fallbackStart: edge.start,
+      fallbackEnd: edge.end,
+      polyline: payload.polyline,
+    });
+    const scored = scoreBusRouteCandidate({
+      resolution: anchor,
+      fallbackStart: edge.start,
+      fallbackEnd: edge.end,
+    });
+    if (scored.score > selectedRouteScore) {
+      selectedRouteScore = scored.score;
+      selectedRouteId = candidateId;
+      selectedPayload = payload;
+      selectedAnchor = anchor;
+    }
+  }
+  if (!selectedPayload || !selectedRouteId || !selectedAnchor) {
+    return buildBusFallback('passStops-fallback', 'no-valid-route-candidate');
+  }
+
+  const startStop = selectedAnchor.startStation ? { lat: selectedAnchor.startStation.lat, lng: selectedAnchor.startStation.lng } : edge.start;
+  const endStop = selectedAnchor.endStation ? { lat: selectedAnchor.endStation.lat, lng: selectedAnchor.endStation.lng } : edge.end;
+  const polyline = selectedPayload.polyline;
+  const slicedResult = sliceBusPolylineByStationSeq(polyline, selectedPayload.stations, segment, startStop, endStop);
+  let sliced = slicedResult.points;
+  let tighteningApplied = false;
+  let fallbackReason: string | null = null;
+  let sliceStartIndex = slicedResult.startIndex;
+  let sliceEndIndex = slicedResult.endIndex;
+  let sliceConfidence: ConfidenceLevel = slicedResult.confidence;
+
+  const pathPoints = normalizePathPoints(segment.pathPoints?.map((point) => ({ lat: point.lat, lng: point.lng })) ?? []);
+  if (pathPoints.length >= 3 && sliced.length >= 2) {
+    const tightened = chooseDirectionalAnchorSlice(sliced, pathPoints);
+    const validation = validatePathPointTightening({ sliced, pathPoints, tightened });
+    if (validation.ok && tightened) {
+      sliced = tightened.points;
+      sliceStartIndex = tightened.startIndex;
+      sliceEndIndex = tightened.endIndex;
+      sliceConfidence = tightened.confidence;
+      tighteningApplied = true;
+    } else {
+      console.warn('[RouteGeometry][BUS][TIGHTEN_SKIP]', { segmentId, reason: validation.reason });
+    }
+  }
+
+  const startToPolylineDistanceMeters = startStop ? distanceToPolylineMeters(sliced, startStop) : null;
+  const endToPolylineDistanceMeters = endStop ? distanceToPolylineMeters(sliced, endStop) : null;
+  const useRoutePath = shouldUseBusRoutePath({
+    routeScore: selectedRouteScore,
+    stationConfidence: selectedAnchor.confidence,
+    sliceConfidence,
     slicedPoints: sliced.length,
   });
-
-  if (sliced.length < 10) {
-    console.warn('[RouteGeometry][BUS][FALLBACK_PASS_STOPS]', {
-      segmentId,
-      busRouteId: segment.busRouteId,
-    });
-    return {
-      source: 'passStops-fallback',
-      points: buildSegmentFallbackPolyline(segment, previousSegment, nextSegment),
-    } as const;
+  if (!useRoutePath) {
+    fallbackReason = 'low-route-confidence';
+    return buildBusFallback('passStops-fallback', fallbackReason);
   }
+
+  console.log('[RouteGeometry][BUS][MATCH]', {
+    segmentId,
+    busRouteId: segment.busRouteId,
+    selectedRouteId,
+    lineLabel: segment.lineLabel ?? null,
+    source: 'seoul-bus-routepath',
+    startName: segment.startName ?? null,
+    endName: segment.endName ?? null,
+    startStationId: segment.startStationId ?? null,
+    endStationId: segment.endStationId ?? null,
+    matchedStartStation: selectedAnchor.startStation
+      ? { name: selectedAnchor.startStation.name ?? null, id: selectedAnchor.startStation.id ?? null, seq: selectedAnchor.startStation.seq ?? null }
+      : null,
+    matchedEndStation: selectedAnchor.endStation
+      ? { name: selectedAnchor.endStation.name ?? null, id: selectedAnchor.endStation.id ?? null, seq: selectedAnchor.endStation.seq ?? null }
+      : null,
+    stationMatchConfidence: selectedAnchor.confidence,
+    totalPolylinePoints: polyline.length,
+    slicedPoints: sliced.length,
+    startToPolylineDistanceMeters,
+    endToPolylineDistanceMeters,
+    sliceStartIndex,
+    sliceEndIndex,
+    tighteningApplied,
+    fallbackReason,
+  });
+  console.log('[RouteGeometry][BUS][SLICE]', {
+    segmentId,
+    sliceStartIndex,
+    sliceEndIndex,
+    score: slicedResult.score,
+    sliceConfidence,
+    reason: slicedResult.reason,
+    tighteningApplied,
+  });
 
   return {
     source: 'seoul-bus-routepath',
-    points: sliced,
+    points: densifyPolyline(sliced, 50),
   } as const;
 }
 
-function resolveSubwayGeometry(
+async function resolveSubwayGeometry(
   segment: TrackingSegment,
+  previousSegment?: TrackingSegment,
+  nextSegment?: TrackingSegment,
 ) {
+  const { start, end } = resolveSegmentEdgePoints(segment, previousSegment, nextSegment);
   const lineName = resolveSubwayLineName(segment.lineLabel);
+  const subwayPointsFromStops = normalizePathPoints(
+    (segment.pathPoints ?? []).map((point) => ({ lat: point.lat, lng: point.lng })),
+  );
+  const inferred = start && end ? inferSubwayPolylineByCoords(start, end) : null;
+
+  const withFallbackByPriority = (lineLabel: string) => {
+    if (inferred && inferred.length >= 2) {
+      return {
+        source: 'subway-line-inferred',
+        lineName: lineLabel,
+        points: inferred,
+      } as const;
+    }
+    if (subwayPointsFromStops.length >= 3) {
+      return {
+        source: 'subway-pass-stops',
+        lineName: lineLabel,
+        points: subwayPointsFromStops,
+      } as const;
+    }
+    return {
+      source: 'fallback',
+      lineName: lineLabel,
+      points: buildStopBasedPolyline(segment, previousSegment, nextSegment),
+    } as const;
+  };
+
+  if (lineName) {
+    const sliced = sliceSubwayLine(
+      lineName,
+      segment.startName,
+      segment.endName,
+      start,
+      end,
+    );
+    if (sliced.length >= 3) {
+      return {
+        source: 'subway-line-geometry',
+        lineName,
+        points: sliced,
+      } as const;
+    }
+    return withFallbackByPriority(lineName);
+  }
+
   if (!lineName) {
     console.warn('[RouteGeometry][SUBWAY][NO_LINE_DATA]', segment.lineLabel ?? null);
     console.warn('[RouteGeometry][SUBWAY][FALLBACK]', segment);
-    return {
-      source: 'fallback',
-      lineName: segment.lineLabel ?? '지하철',
-      points: [] as MapCoordinate[],
-    } as const;
+    return withFallbackByPriority(segment.lineLabel ?? '지하철');
   }
 
-  const stations = subwayLineGeometry[lineName] ?? [];
-  if (stations.length === 0) {
-    console.warn('[RouteGeometry][SUBWAY][NO_LINE_DATA]', lineName);
-    console.warn('[RouteGeometry][SUBWAY][FALLBACK]', segment);
-    return {
-      source: 'fallback',
-      lineName,
-      points: [] as MapCoordinate[],
-    } as const;
-  }
-
-  const startName = normalizeStationToken(segment.startName);
-  const endName = normalizeStationToken(segment.endName);
-  const startIndex = stations.findIndex((station) => normalizeStationToken(station.name) === startName);
-  const endIndex = stations.findIndex((station) => normalizeStationToken(station.name) === endName);
-
-  if (startIndex === -1 || endIndex === -1) {
-    console.warn('[RouteGeometry][SUBWAY][STATION_NOT_FOUND]', {
-      lineName,
-      start: segment.startName,
-      end: segment.endName,
-    });
-    console.warn('[RouteGeometry][SUBWAY][FALLBACK]', segment);
-    return {
-      source: 'fallback',
-      lineName,
-      points: [] as MapCoordinate[],
-    } as const;
-  }
-
-  const slicedStations =
-    startIndex < endIndex
-      ? stations.slice(startIndex, endIndex + 1)
-      : stations.slice(endIndex, startIndex + 1).reverse();
-
-  const polyline = slicedStations.map((station) => ({
-    lat: station.lat,
-    lng: station.lng,
-  }));
-
-  console.log('[RouteGeometry][SUBWAY]', {
-    lineName,
-    start: segment.startName,
-    end: segment.endName,
-    pointCount: polyline.length,
-  });
-
-  return {
-    source: 'subway-line-geometry',
-    lineName,
-    points: polyline,
-  } as const;
+  return withFallbackByPriority(segment.lineLabel ?? '지하철');
 }
 
-async function buildRouteSegments(route: NonNullable<ReturnType<typeof useTripTracking>['route']>) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+async function buildRouteSegmentsLegacy(
+  route: NonNullable<ReturnType<typeof useTripTracking>['route']>,
+  options?: { origin?: MapCoordinate | null; destination?: MapCoordinate | null },
+) {
   const segments = (route.mobilitySegments ?? []).filter((segment) => segment.mode !== 'car');
   const resolved: MapRouteSegment[] = [];
 
@@ -542,6 +1214,26 @@ async function buildRouteSegments(route: NonNullable<ReturnType<typeof useTripTr
     const segment = segments[index];
     const previousSegment = index > 0 ? segments[index - 1] : undefined;
     const nextSegment = index < segments.length - 1 ? segments[index + 1] : undefined;
+    const previousWithEdge =
+      previousSegment ??
+      (index === 0 && options?.origin
+        ? ({
+            mode: 'walk',
+            durationMinutes: 1,
+            endLat: options.origin.lat,
+            endLng: options.origin.lng,
+          } as TrackingSegment)
+        : undefined);
+    const nextWithEdge =
+      nextSegment ??
+      (index === segments.length - 1 && options?.destination
+        ? ({
+            mode: 'walk',
+            durationMinutes: 1,
+            startLat: options.destination.lat,
+            startLng: options.destination.lng,
+          } as TrackingSegment)
+        : undefined);
     const mode = modeToMapMode(segment.mode);
     if (!mode) {
       continue;
@@ -553,7 +1245,7 @@ async function buildRouteSegments(route: NonNullable<ReturnType<typeof useTripTr
       const ensuredPoints =
         result.points.length >= 2
           ? result.points
-          : buildSegmentFallbackPolyline(segment, previousSegment, nextSegment);
+          : buildSegmentFallbackPolyline(segment, previousWithEdge, nextWithEdge);
       console.log('[RouteGeometry][WALK]', {
         segmentId,
         source: result.source === 'fallback' ? 'kakao-directions-fallback' : result.source,
@@ -571,11 +1263,11 @@ async function buildRouteSegments(route: NonNullable<ReturnType<typeof useTripTr
     }
 
     if (mode === 'BUS') {
-      const result = await resolveBusGeometry(segment, previousSegment, nextSegment);
+      const result = await resolveBusGeometry(segment, previousWithEdge, nextWithEdge);
       const ensuredPoints =
         result.points.length >= 2
           ? result.points
-          : buildSegmentFallbackPolyline(segment, previousSegment, nextSegment);
+          : buildSegmentFallbackPolyline(segment, previousWithEdge, nextWithEdge);
       console.log('[RouteGeometry][BUS]', {
         segmentId,
         source: result.source,
@@ -592,15 +1284,22 @@ async function buildRouteSegments(route: NonNullable<ReturnType<typeof useTripTr
       continue;
     }
 
-    const result = resolveSubwayGeometry(segment);
-    const ensuredPoints = result.points;
+    const result = await resolveSubwayGeometry(segment, previousWithEdge, nextWithEdge);
+    const ensuredPoints =
+      result.points.length >= 2 ? result.points : buildSegmentFallbackPolyline(segment, previousWithEdge, nextWithEdge);
+    console.log('[RouteGeometry][SUBWAY_SOURCE]', {
+      segmentId,
+      source: result.source,
+      lineName: result.lineName,
+      pointCount: ensuredPoints.length,
+    });
     console.log('[RouteGeometry][SUBWAY]', {
       segmentId,
       source: result.source,
       lineName: result.lineName,
       pointCount: ensuredPoints.length,
     });
-    if (ensuredPoints.length < 3) continue;
+    if (ensuredPoints.length < 2) continue;
     resolved.push({
       id: segmentId,
       mode,
@@ -627,6 +1326,8 @@ export function useMovingState() {
   const { origin, destination, arrivalAt, selectedRoute } = useCommutePlan();
   const autoStartAttemptedKeyRef = useRef<string | null>(null);
   const locationPermissionRef = useRef<boolean | null>(null);
+  const routeBuildInFlightRef = useRef<string | null>(null);
+  const lastCompletedRouteBuildRef = useRef<string | null>(null);
   const [resolvedRouteSegments, setResolvedRouteSegments] = useState<MapRouteSegment[]>([]);
 
   const getCurrentPosition = useCallback(async () => {
@@ -684,11 +1385,13 @@ export function useMovingState() {
       return;
     }
 
-    if (tracking.isRunning) {
-      return;
-    }
-
-    if (autoStartAttemptedKeyRef.current === trackingKey) {
+    if (
+      !shouldAutoStartTracking({
+        trackingKey,
+        isRunning: tracking.isRunning,
+        attemptedKey: autoStartAttemptedKeyRef.current,
+      })
+    ) {
       return;
     }
 
@@ -697,24 +1400,74 @@ export function useMovingState() {
   }, [tracking.isRunning, tracking.start, trackingKey]);
 
   useEffect(() => {
-    const route = tracking.route;
+    const route = selectedRoute?.rawRoute ?? tracking.route;
     if (!route) {
+      routeBuildInFlightRef.current = null;
+      lastCompletedRouteBuildRef.current = null;
       setResolvedRouteSegments([]);
       return;
     }
 
+    const routeBuildKey = `${route.id ?? 'unknown'}:${(route.mobilitySegments ?? [])
+      .map((segment, index) => `${index}:${segment.mode}:${segment.lineLabel ?? ''}:${segment.startName ?? ''}:${segment.endName ?? ''}`)
+      .join('|')}`;
+    if (routeBuildInFlightRef.current === routeBuildKey || lastCompletedRouteBuildRef.current === routeBuildKey) {
+      return;
+    }
+    routeBuildInFlightRef.current = routeBuildKey;
+
     let cancelled = false;
+    const startedAt = Date.now();
     const run = async () => {
-      const nextSegments = await buildRouteSegments(route);
-      if (!cancelled) {
-        setResolvedRouteSegments(nextSegments);
+      const nextOrigin = origin ? { lat: origin.latitude, lng: origin.longitude } : null;
+      const nextDestination = destination ? { lat: destination.latitude, lng: destination.longitude } : null;
+      if (nextOrigin && nextDestination) {
+        const immediate = buildImmediateFallbackAll(
+          (route.mobilitySegments ?? []).filter((segment) => segment.mode !== 'car'),
+          nextOrigin,
+          nextDestination,
+        );
+        console.log('[MovingState][FALLBACK_APPLIED_T0]', {
+          routeId: route.id ?? null,
+          segmentCount: immediate.length,
+          elapsedMs: Date.now() - startedAt,
+        });
+        setResolvedRouteSegments(immediate);
       }
+
+      const nextSegments = await buildResolvedRouteSegments(
+        route as RawRoute,
+        {
+          origin: nextOrigin ?? movingMapMockData.currentLocation,
+          destination: nextDestination ?? movingMapMockData.nextActionPoint.coordinate,
+        },
+        (progressiveSegments) => {
+          if (!cancelled) {
+            console.log('[MovingState][PROGRESSIVE_SEGMENTS_UPDATE]', {
+              routeId: route.id ?? null,
+              segmentCount: progressiveSegments.length,
+              elapsedMs: Date.now() - startedAt,
+            });
+            setResolvedRouteSegments(progressiveSegments);
+          }
+        },
+      );
+      if (!cancelled) {
+        console.log('[MovingState][FINAL_SEGMENTS_APPLIED]', {
+          routeId: route.id ?? null,
+          segmentCount: nextSegments.length,
+          elapsedMs: Date.now() - startedAt,
+        });
+        setResolvedRouteSegments(nextSegments);
+        lastCompletedRouteBuildRef.current = routeBuildKey;
+      }
+      routeBuildInFlightRef.current = null;
     };
     void run();
     return () => {
       cancelled = true;
     };
-  }, [tracking.route?.id, tracking.route]);
+  }, [destination, origin, selectedRoute?.id, selectedRoute?.rawRoute, tracking.route?.id, tracking.route]);
 
   const status = mapApiStatusToUiStatus(tracking.status);
   const progress = Math.max(0, Math.min(1, tracking.movement?.progress ?? 0));
@@ -793,6 +1546,37 @@ export function useMovingState() {
         };
       });
   }, [selectedRoute?.segments, tracking.movement?.currentSegmentIndex, tracking.route?.mobilitySegments]);
+  const stableTimeySnapshotRef = useRef<TimeyTransitionSnapshot | null>(null);
+
+  const currentSegment = tracking.route?.mobilitySegments?.[tracking.movement?.currentSegmentIndex ?? 0];
+  const nextDepartureMinutes = currentSegment?.realtimeInfo?.etaMinutes ?? null;
+  const bufferMinutes = selectedRoute?.bufferMinutes;
+  const delayMinutes =
+    typeof bufferMinutes === 'number' && bufferMinutes < 0 ? Math.abs(Math.round(bufferMinutes)) : 0;
+  const tripStatus: string | undefined =
+    progress >= 0.995 || remainingTimeMinutes <= 1 ? 'ARRIVED' : undefined;
+
+  const timeyContext: TimeyContext = useMemo(
+    () =>
+      selectTimeyContextFromTrip({
+        trip: tracking,
+        bufferMinutes,
+        delayMinutes,
+        tripStatus,
+      }),
+    [bufferMinutes, delayMinutes, tracking, tripStatus],
+  );
+  const rawTimeyState = resolveTimeyStateMachine(timeyContext);
+  const stableTimeySnapshot = useMemo(() => {
+    const next = advanceStableTimeySnapshot(
+      stableTimeySnapshotRef.current,
+      rawTimeyState,
+      Date.now(),
+      timeyContext,
+    );
+    stableTimeySnapshotRef.current = next;
+    return next;
+  }, [rawTimeyState, timeyContext]);
 
   const currentActionText = useMemo(() => {
     const currentIndex = Math.max(0, tracking.movement?.currentSegmentIndex ?? 0);
@@ -954,5 +1738,10 @@ export function useMovingState() {
     destinationPin: destination ? { lat: destination.latitude, lng: destination.longitude } : null,
     routePathPoints: mapData.routePath.points,
     detailLines,
+    timeyContext: {
+      ...timeyContext,
+      nextDepartureMinutes,
+    },
+    timeyState: stableTimeySnapshot.state,
   };
 }

@@ -13,21 +13,25 @@ import shinbundang from '../../assets/subway-lines/line-shinbundang.json';
 export type LineStation = {
   id: string;
   name: string;
+  aliases?: string[];
   lat: number;
   lng: number;
 };
 
+export type LineBranch = {
+  branchId: string;
+  stations: LineStation[];
+  railPolyline: MapCoordinate[];
+};
+
 export type LineData = {
-  line?: string;
-  aliases?: string[];
-  stations?: LineStation[];
-  features?: Array<{
-    id?: string;
-    geometry?: {
-      type?: string;
-      coordinates?: unknown;
-    };
-  }>;
+  lineName: string;
+  branches: LineBranch[];
+};
+
+const STATION_ID_ALIAS_MAP: Record<string, string> = {
+  '211': '강남',
+  '222': '역삼',
 };
 
 const RAW_LINE_MAP: Record<string, LineData> = {
@@ -83,34 +87,29 @@ function normalizeLineLabel(value?: string) {
   return String(value ?? '').replace(/\s+/g, '').trim();
 }
 
+function normalizeStationName(value?: string) {
+  return String(value ?? '')
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/\([^)]*\)/g, '')
+    .replace(/[1-9]\d*호선/g, '')
+    .replace(/역/g, '')
+    .replace(/[^\p{L}\p{N}]/gu, '')
+    .toLowerCase();
+}
+
 function resolveLineData(lineLabel: string): LineData | null {
-  if (LINE_MAP[lineLabel]) {
-    return LINE_MAP[lineLabel];
-  }
+  if (LINE_MAP[lineLabel]) return LINE_MAP[lineLabel];
   const normalized = normalizeLineLabel(lineLabel);
-  if (!normalized) {
-    return null;
-  }
+  if (!normalized) return null;
   for (const [key, value] of Object.entries(LINE_MAP)) {
-    if (normalizeLineLabel(key) === normalized) {
-      return value;
-    }
+    if (normalizeLineLabel(key) === normalized) return value;
   }
   for (const [key, value] of Object.entries(LINE_MAP)) {
     const normalizedKey = normalizeLineLabel(key);
-    if (normalized.includes(normalizedKey) || normalizedKey.includes(normalized)) {
-      return value;
-    }
+    if (normalized.includes(normalizedKey) || normalizedKey.includes(normalized)) return value;
   }
   return null;
-}
-
-function toCoordinate(entry: unknown): MapCoordinate | null {
-  if (!Array.isArray(entry) || entry.length < 2) return null;
-  const lng = Number(entry[0]);
-  const lat = Number(entry[1]);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-  return { lat, lng };
 }
 
 function toMeters(a: MapCoordinate, b: MapCoordinate) {
@@ -127,51 +126,15 @@ function toMeters(a: MapCoordinate, b: MapCoordinate) {
 
 function polylineLengthMeters(points: MapCoordinate[]) {
   let total = 0;
-  for (let i = 1; i < points.length; i += 1) {
-    total += toMeters(points[i - 1], points[i]);
-  }
+  for (let i = 1; i < points.length; i += 1) total += toMeters(points[i - 1], points[i]);
   return total;
 }
 
-function flattenFeatureCoordinates(line: LineData): MapCoordinate[] {
-  const points: MapCoordinate[] = [];
-  for (const feature of line.features ?? []) {
-    const geom = feature.geometry;
-    if (!geom?.coordinates) continue;
-    if (geom.type === 'LineString' && Array.isArray(geom.coordinates)) {
-      for (const entry of geom.coordinates) {
-        const coordinate = toCoordinate(entry);
-        if (coordinate) points.push(coordinate);
-      }
-      continue;
-    }
-    if (geom.type === 'MultiLineString' && Array.isArray(geom.coordinates)) {
-      for (const lineCoords of geom.coordinates) {
-        if (!Array.isArray(lineCoords)) continue;
-        for (const entry of lineCoords) {
-          const coordinate = toCoordinate(entry);
-          if (coordinate) points.push(coordinate);
-        }
-      }
-    }
-  }
-  return points.filter((point, index, arr) => {
-    if (index === 0) return true;
-    const prev = arr[index - 1];
-    return Math.abs(prev.lat - point.lat) > 0.000001 || Math.abs(prev.lng - point.lng) > 0.000001;
-  });
-}
-
-function normalizeName(value?: string) {
-  return String(value ?? '').replace(/\s+/g, '').replace(/역$/, '').trim();
-}
-
-function findNearestIndex(polyline: MapCoordinate[], target: MapCoordinate) {
+function findNearestRailIndex(polyline: MapCoordinate[], target: MapCoordinate) {
   let bestIdx = 0;
   let bestDist = Number.POSITIVE_INFINITY;
   for (let i = 0; i < polyline.length; i += 1) {
-    const p = polyline[i];
-    const d = (p.lat - target.lat) ** 2 + (p.lng - target.lng) ** 2;
+    const d = toMeters(polyline[i], target);
     if (d < bestDist) {
       bestDist = d;
       bestIdx = i;
@@ -180,144 +143,60 @@ function findNearestIndex(polyline: MapCoordinate[], target: MapCoordinate) {
   return bestIdx;
 }
 
-function projectPointToSegment(point: MapCoordinate, a: MapCoordinate, b: MapCoordinate) {
-  const ax = a.lng;
-  const ay = a.lat;
-  const bx = b.lng;
-  const by = b.lat;
-  const px = point.lng;
-  const py = point.lat;
-
-  const abx = bx - ax;
-  const aby = by - ay;
-  const ab2 = abx * abx + aby * aby;
-  if (ab2 <= 0) {
-    return { point: a, t: 0, distance2: (px - ax) * (px - ax) + (py - ay) * (py - ay) };
+function dedupePolyline(points: MapCoordinate[]) {
+  if (points.length < 2) return points;
+  const out: MapCoordinate[] = [points[0]];
+  for (let i = 1; i < points.length; i += 1) {
+    const prev = out[out.length - 1];
+    const next = points[i];
+    if (Math.abs(prev.lat - next.lat) > 1e-8 || Math.abs(prev.lng - next.lng) > 1e-8) out.push(next);
   }
-
-  const apx = px - ax;
-  const apy = py - ay;
-  const rawT = (apx * abx + apy * aby) / ab2;
-  const t = Math.max(0, Math.min(1, rawT));
-  const proj = {
-    lng: ax + abx * t,
-    lat: ay + aby * t,
-  };
-  const dx = px - proj.lng;
-  const dy = py - proj.lat;
-  return { point: proj, t, distance2: dx * dx + dy * dy };
+  return out;
 }
 
-function findNearestProjectionOnPolyline(polyline: MapCoordinate[], target: MapCoordinate) {
-  if (polyline.length < 2) {
-    return {
-      segmentIndex: 0,
-      projected: polyline[0] ?? target,
-      distance2: Number.POSITIVE_INFINITY,
-    };
-  }
-
-  let best = {
-    segmentIndex: 0,
-    projected: polyline[0],
-    distance2: Number.POSITIVE_INFINITY,
-  };
-  for (let i = 0; i < polyline.length - 1; i += 1) {
-    const projected = projectPointToSegment(target, polyline[i], polyline[i + 1]);
-    if (projected.distance2 < best.distance2) {
-      best = {
-        segmentIndex: i,
-        projected: projected.point,
-        distance2: projected.distance2,
-      };
-    }
-  }
-  return best;
+function stationMatches(station: LineStation, target?: string) {
+  if (!target) return false;
+  const normalizedTarget = normalizeStationName(STATION_ID_ALIAS_MAP[target] ?? target);
+  if (!normalizedTarget) return false;
+  const names = [station.name, ...(station.aliases ?? []), STATION_ID_ALIAS_MAP[station.id] ?? ''];
+  return names.some((n) => normalizeStationName(n) === normalizedTarget);
 }
 
-function slicePolylineByProjection(polyline: MapCoordinate[], start: MapCoordinate, end: MapCoordinate) {
-  if (polyline.length < 2) {
-    return polyline;
+type StationResolution = {
+  station: LineStation | null;
+  matchedBy: 'name' | 'coord' | 'none';
+};
+
+function resolveStation(branch: LineBranch, targetName?: string, fallbackCoordinate?: MapCoordinate): StationResolution {
+  const byName = branch.stations.find((s) => stationMatches(s, targetName)) ?? null;
+  if (byName) return { station: byName, matchedBy: 'name' };
+  if (!fallbackCoordinate || branch.stations.length === 0) return { station: null, matchedBy: 'none' };
+  let best = branch.stations[0];
+  let bestDist = Number.POSITIVE_INFINITY;
+  for (const st of branch.stations) {
+    const d = toMeters(fallbackCoordinate, { lat: st.lat, lng: st.lng });
+    if (d < bestDist) {
+      bestDist = d;
+      best = st;
+    }
   }
-
-  const startProj = findNearestProjectionOnPolyline(polyline, start);
-  const endProj = findNearestProjectionOnPolyline(polyline, end);
-
-  if (startProj.segmentIndex <= endProj.segmentIndex) {
-    const middle = polyline.slice(startProj.segmentIndex + 1, endProj.segmentIndex + 1);
-    return [startProj.projected, ...middle, endProj.projected];
-  }
-
-  const middle = polyline.slice(endProj.segmentIndex + 1, startProj.segmentIndex + 1).reverse();
-  return [startProj.projected, ...middle, endProj.projected];
+  return { station: best, matchedBy: 'coord' };
 }
 
-function featureLineStrings(line: LineData): MapCoordinate[][] {
-  const lines: MapCoordinate[][] = [];
-  for (const feature of line.features ?? []) {
-    const geom = feature.geometry;
-    if (!geom?.coordinates) continue;
-    if (geom.type === 'LineString' && Array.isArray(geom.coordinates)) {
-      const lineCoords = geom.coordinates
-        .map((entry) => toCoordinate(entry))
-        .filter((value): value is MapCoordinate => Boolean(value));
-      if (lineCoords.length >= 2) lines.push(lineCoords);
-      continue;
-    }
-    if (geom.type === 'MultiLineString' && Array.isArray(geom.coordinates)) {
-      for (const part of geom.coordinates) {
-        if (!Array.isArray(part)) continue;
-        const lineCoords = part
-          .map((entry) => toCoordinate(entry))
-          .filter((value): value is MapCoordinate => Boolean(value));
-        if (lineCoords.length >= 2) lines.push(lineCoords);
-      }
-    }
-  }
-  return lines;
+function buildSlice(branch: LineBranch, start: MapCoordinate, end: MapCoordinate) {
+  if (branch.railPolyline.length < 2) return null;
+  const startIdx = findNearestRailIndex(branch.railPolyline, start);
+  const endIdx = findNearestRailIndex(branch.railPolyline, end);
+  const sliced =
+    startIdx <= endIdx
+      ? branch.railPolyline.slice(startIdx, endIdx + 1)
+      : branch.railPolyline.slice(endIdx, startIdx + 1).reverse();
+  if (sliced.length < 2) return null;
+  return { sliced, startIdx, endIdx, length: polylineLengthMeters(sliced) };
 }
 
-function chooseBestLineForPair(lines: MapCoordinate[][], start: MapCoordinate, end: MapCoordinate) {
-  let best: MapCoordinate[] | null = null;
-  let bestScore = Number.POSITIVE_INFINITY;
-  const crow = toMeters(start, end);
-
-  for (const line of lines) {
-    if (line.length < 2) continue;
-    const startSnap = findNearestProjectionOnPolyline(line, start);
-    const endSnap = findNearestProjectionOnPolyline(line, end);
-    const sliced = slicePolylineByProjection(line, start, end);
-    if (sliced.length < 2) continue;
-    const pathMeters = polylineLengthMeters(sliced);
-    if (pathMeters < Math.max(200, crow * 0.85)) continue;
-    const score =
-      Math.sqrt(startSnap.distance2) +
-      Math.sqrt(endSnap.distance2) +
-      Math.abs(pathMeters - crow * 1.15) * 0.02;
-    if (score < bestScore) {
-      bestScore = score;
-      best = sliced;
-    }
-  }
-
-  return best;
-}
-
-function mergePolylineChunks(chunks: MapCoordinate[][]) {
-  const merged: MapCoordinate[] = [];
-  for (const chunk of chunks) {
-    for (const point of chunk) {
-      const prev = merged[merged.length - 1];
-      if (!prev) {
-        merged.push(point);
-        continue;
-      }
-      if (Math.abs(prev.lat - point.lat) > 0.000001 || Math.abs(prev.lng - point.lng) > 0.000001) {
-        merged.push(point);
-      }
-    }
-  }
-  return merged;
+function debugLog(payload: Record<string, unknown>) {
+  console.info('[SubwayGeometry][sliceSubwayLine]', payload);
 }
 
 export function sliceSubwayLine(
@@ -328,78 +207,102 @@ export function sliceSubwayLine(
   endCoordinate?: MapCoordinate,
 ): MapCoordinate[] {
   const data = resolveLineData(lineLabel);
-  if (!data) return [];
-  const allPolyline = flattenFeatureCoordinates(data);
-  if (allPolyline.length < 2) return [];
+  if (!data || data.branches.length === 0) return [];
 
-  const stations = (data.stations ?? []).filter((s) => Number.isFinite(s.lat) && Number.isFinite(s.lng));
-  const startStation = stations.find((s) => normalizeName(s.name) === normalizeName(startStationName));
-  const endStation = stations.find((s) => normalizeName(s.name) === normalizeName(endStationName));
+  const branches = data.branches.filter((b) => b.railPolyline.length >= 2);
+  if (branches.length === 0) return [];
 
-  if ((!startStation || !endStation) && (!startCoordinate || !endCoordinate)) {
-    return allPolyline;
-  }
+  type Candidate = {
+    branch: LineBranch;
+    reason: 'A' | 'B' | 'C' | 'D';
+    slice: MapCoordinate[];
+    startIdx: number;
+    endIdx: number;
+    length: number;
+  };
+  const candidates: Candidate[] = [];
 
-  const start = startCoordinate ?? { lat: startStation!.lat, lng: startStation!.lng };
-  const end = endCoordinate ?? { lat: endStation!.lat, lng: endStation!.lng };
-  const crowMeters = toMeters(start, end);
-  const lines = featureLineStrings(data);
+  for (const branch of branches) {
+    const startResolved = resolveStation(branch, startStationName, startCoordinate);
+    const endResolved = resolveStation(branch, endStationName, endCoordinate);
+    const startStation = startResolved.station;
+    const endStation = endResolved.station;
+    const hasStartByName = startResolved.matchedBy === 'name';
+    const hasEndByName = endResolved.matchedBy === 'name';
+    const hasAnyByName = hasStartByName || hasEndByName;
 
-  // 1) 역 순서 기반 구간 분할 슬라이스 (가장 실제 호선 형태에 근접)
-  if (startStation && endStation && lines.length > 0) {
-    const startIdx = stations.findIndex((s) => normalizeName(s.name) === normalizeName(startStation.name));
-    const endIdx = stations.findIndex((s) => normalizeName(s.name) === normalizeName(endStation.name));
-    if (startIdx !== -1 && endIdx !== -1 && startIdx !== endIdx) {
-      const stationPath =
-        startIdx < endIdx ? stations.slice(startIdx, endIdx + 1) : stations.slice(endIdx, startIdx + 1).reverse();
-      const chunks: MapCoordinate[][] = [];
-      for (let i = 0; i < stationPath.length - 1; i += 1) {
-        const a = { lat: stationPath[i].lat, lng: stationPath[i].lng };
-        const b = { lat: stationPath[i + 1].lat, lng: stationPath[i + 1].lng };
-        const bestPair = chooseBestLineForPair(lines, a, b);
-        if (bestPair && bestPair.length >= 2) {
-          chunks.push(bestPair);
-        }
-      }
-      const mergedByStations = mergePolylineChunks(chunks);
-      if (mergedByStations.length >= 8) {
-        return mergedByStations;
-      }
-    }
-  }
-
-  let bestSlice: MapCoordinate[] = [];
-  let bestScore = Number.POSITIVE_INFINITY;
-
-  for (const line of lines) {
-    const startSnapInfo = findNearestProjectionOnPolyline(line, start);
-    const endSnapInfo = findNearestProjectionOnPolyline(line, end);
-    const startSnap = startSnapInfo.projected;
-    const endSnap = endSnapInfo.projected;
-    const startSnapMeters = toMeters(startSnap, start);
-    const endSnapMeters = toMeters(endSnap, end);
-    const sliced = slicePolylineByProjection(line, start, end);
-    if (sliced.length < 2) continue;
-    const pathMeters = polylineLengthMeters(sliced);
-    if (pathMeters < Math.max(crowMeters * 0.9, 500)) {
+    if (hasStartByName && hasEndByName) {
+      const start = startCoordinate ?? { lat: startStation!.lat, lng: startStation!.lng };
+      const end = endCoordinate ?? { lat: endStation!.lat, lng: endStation!.lng };
+      const sliced = buildSlice(branch, start, end);
+      if (sliced) candidates.push({ branch, reason: 'A', slice: sliced.sliced, startIdx: sliced.startIdx, endIdx: sliced.endIdx, length: sliced.length });
       continue;
     }
-    const score = startSnapMeters + endSnapMeters + Math.max(0, 80 - sliced.length) - Math.min(pathMeters, 30000) * 0.02;
-    if (score < bestScore) {
-      bestScore = score;
-      bestSlice = sliced;
+
+    if (hasAnyByName && startStation && endStation) {
+      const start = startCoordinate ?? { lat: startStation.lat, lng: startStation.lng };
+      const end = endCoordinate ?? { lat: endStation.lat, lng: endStation.lng };
+      if (start && end) {
+        const sliced = buildSlice(branch, start, end);
+        if (sliced) candidates.push({ branch, reason: 'B', slice: sliced.sliced, startIdx: sliced.startIdx, endIdx: sliced.endIdx, length: sliced.length });
+      }
+      continue;
+    }
+
+    if (startCoordinate && endCoordinate) {
+      const sliced = buildSlice(branch, startCoordinate, endCoordinate);
+      if (sliced) candidates.push({ branch, reason: 'C', slice: sliced.sliced, startIdx: sliced.startIdx, endIdx: sliced.endIdx, length: sliced.length });
     }
   }
 
-  if (bestSlice.length >= 8) {
-    return bestSlice;
+  candidates.sort((a, b) => {
+    const priority = { A: 0, B: 1, C: 2, D: 3 };
+    if (priority[a.reason] !== priority[b.reason]) return priority[a.reason] - priority[b.reason];
+    if (a.reason === 'A' && b.reason === 'A') {
+      const shorter = Math.min(a.length, b.length);
+      const longer = Math.max(a.length, b.length);
+      // 동일 A 후보 길이가 거의 같으면(<=8%) 디테일이 높은 polyline(점 밀도)이 우선.
+      if (shorter > 0 && (longer - shorter) / shorter <= 0.08) {
+        const aDensity = a.slice.length / Math.max(1, a.length);
+        const bDensity = b.slice.length / Math.max(1, b.length);
+        if (Math.abs(aDensity - bDensity) > 1e-6) return bDensity - aDensity;
+      }
+    }
+    return a.length - b.length;
+  });
+
+  const best = candidates[0];
+  if (best) {
+    const out = dedupePolyline(best.slice);
+    debugLog({
+      lineLabel,
+      resolvedLine: data.lineName,
+      resolvedBranch: best.branch.branchId,
+      startStation: startStationName,
+      endStation: endStationName,
+      startRailIndex: best.startIdx,
+      endRailIndex: best.endIdx,
+      polylineLength: best.branch.railPolyline.length,
+      sliceLength: out.length,
+      fallbackReason: best.reason,
+    });
+    return out;
   }
 
-  const startIdx = findNearestIndex(allPolyline, start);
-  const endIdx = findNearestIndex(allPolyline, end);
-  const fallbackSlice =
-    startIdx <= endIdx
-      ? allPolyline.slice(startIdx, endIdx + 1)
-      : allPolyline.slice(endIdx, startIdx + 1).reverse();
-  return fallbackSlice.length >= 2 ? fallbackSlice : allPolyline;
+  const directStart = startCoordinate ?? branches[0].railPolyline[0];
+  const directEnd = endCoordinate ?? branches[0].railPolyline[branches[0].railPolyline.length - 1];
+  const direct = dedupePolyline([directStart, directEnd]);
+  debugLog({
+    lineLabel,
+    resolvedLine: data.lineName,
+    resolvedBranch: null,
+    startStation: startStationName,
+    endStation: endStationName,
+    startRailIndex: null,
+    endRailIndex: null,
+    polylineLength: 2,
+    sliceLength: direct.length,
+    fallbackReason: 'D',
+  });
+  return direct;
 }
