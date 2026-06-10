@@ -1,4 +1,4 @@
-import { EtaFallbackStrategy } from '../../../../../src/modules/realtime/strategies/eta-fallback.strategy';
+import { EtaFallbackStrategy } from '../../../../src/modules/realtime/strategies/eta-fallback.strategy';
 
 describe('EtaFallbackStrategy', () => {
   const strategy = new EtaFallbackStrategy();
@@ -43,4 +43,3 @@ describe('EtaFallbackStrategy', () => {
     expect(result.status).toBe('UNAVAILABLE');
   });
 });
-

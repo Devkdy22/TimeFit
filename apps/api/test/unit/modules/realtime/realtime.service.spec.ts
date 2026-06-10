@@ -1,9 +1,9 @@
-import { RealtimeCacheService } from '../../../../../src/modules/realtime/cache/realtime-cache.service';
-import { RealtimeLogger } from '../../../../../src/modules/realtime/logs/realtime.logger';
-import { BusProvider } from '../../../../../src/modules/realtime/providers/bus.provider';
-import { SubwayProvider } from '../../../../../src/modules/realtime/providers/subway.provider';
-import { RealtimeService } from '../../../../../src/modules/realtime/realtime.service';
-import { EtaFallbackStrategy } from '../../../../../src/modules/realtime/strategies/eta-fallback.strategy';
+import { RealtimeCacheService } from '../../../../src/modules/realtime/cache/realtime-cache.service';
+import { RealtimeLogger } from '../../../../src/modules/realtime/logs/realtime.logger';
+import { BusProvider } from '../../../../src/modules/realtime/providers/bus.provider';
+import { SubwayProvider } from '../../../../src/modules/realtime/providers/subway.provider';
+import { RealtimeService } from '../../../../src/modules/realtime/realtime.service';
+import { EtaFallbackStrategy } from '../../../../src/modules/realtime/strategies/eta-fallback.strategy';
 
 describe('RealtimeService', () => {
   function createService(overrides?: {
@@ -77,4 +77,3 @@ describe('RealtimeService', () => {
     expect(third.status).toBe('UNAVAILABLE');
   });
 });
-

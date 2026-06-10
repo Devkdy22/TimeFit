@@ -1,4 +1,4 @@
-import { SubwayStationMatcher } from '../../../../../src/modules/realtime/matchers/subway-station.matcher';
+import { SubwayStationMatcher } from '../../../../src/modules/realtime/matchers/subway-station.matcher';
 
 describe('SubwayStationMatcher', () => {
   const matcher = new SubwayStationMatcher();
@@ -16,4 +16,3 @@ describe('SubwayStationMatcher', () => {
     expect(matcher.isSupportedLine('신분당선')).toBe(true);
   });
 });
-

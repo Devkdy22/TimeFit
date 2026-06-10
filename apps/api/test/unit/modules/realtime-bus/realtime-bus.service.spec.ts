@@ -37,6 +37,7 @@ describe('RealtimeBusService', () => {
       logSelected: jest.fn(),
       logEta: jest.fn(),
       logFail: jest.fn(),
+      logFinalUnavailable: jest.fn(),
     };
 
     const createProvider = (type: 'SEOUL' | 'GYEONGGI' | 'INCHEON', priority: number) => ({
@@ -63,6 +64,7 @@ describe('RealtimeBusService', () => {
     const incheon = createProvider('INCHEON', 1);
 
     const seoulBusClient = {
+      probeStationUid: jest.fn().mockResolvedValue(null),
       getArrivalByArsId: jest.fn(async (_arsId: string, routeNo?: string) => {
         if (routeNo && options?.seoulArsStrictArrivalSec !== undefined) {
           if (options.seoulArsStrictArrivalSec === null) {
@@ -287,4 +289,3 @@ describe('RealtimeBusService', () => {
     expect(resolver.resolve).toHaveBeenCalledTimes(1);
   });
 });
-

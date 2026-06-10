@@ -18,7 +18,7 @@ export class RealtimeCacheService {
     if (!entry) {
       return null;
     }
-    if (entry.freshUntil < Date.now()) {
+    if (entry.freshUntil <= Date.now()) {
       return null;
     }
     return entry.value;
@@ -29,7 +29,7 @@ export class RealtimeCacheService {
     if (!entry) {
       return null;
     }
-    if (entry.staleUntil < Date.now()) {
+    if (entry.staleUntil <= Date.now()) {
       return null;
     }
     return entry.value;
@@ -96,4 +96,3 @@ export class RealtimeCacheService {
     return promise;
   }
 }
-

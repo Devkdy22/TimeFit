@@ -3,6 +3,7 @@ import { RouteNameMatcher } from '../matchers/route-name.matcher';
 import { StationMatcher } from '../matchers/station.matcher';
 import { RealtimeBusLogger } from '../logs/realtime-bus.logger';
 import { CandidateScorer } from '../scoring/candidate.scorer';
+import { resolveProviderOverride } from './provider-id-overrides';
 import type {
   BusProvider,
   BusProviderCandidate,
@@ -47,6 +48,7 @@ export class BusIdentityResolver {
       >,
       failedProviders: [] as Array<{ provider: 'SEOUL' | 'GYEONGGI' | 'INCHEON'; reason: RealtimeBusReasonCode }>,
     };
+    const overrideSet = resolveProviderOverride(segment.lineLabel, segment.startStationId);
 
     const stationCandidates: StationCandidate[] = [];
     const routeCandidates: Array<{ station: StationCandidate; route: RouteCandidate }> = [];
@@ -64,6 +66,55 @@ export class BusIdentityResolver {
         });
 
         if (stations.length === 0) {
+          const override = overrideSet?.[provider.type];
+          if (override?.stationId && override?.routeId) {
+            const station: StationCandidate = {
+              provider: provider.type,
+              stationId: override.stationId,
+              stationName: segment.startName?.trim() || override.stationId,
+              arsId: (segment.startArsId ?? '').replace(/[^0-9]/g, '') || undefined,
+              lat: segment.startLat,
+              lng: segment.startLng,
+            };
+            const route: RouteCandidate = {
+              provider: provider.type,
+              routeId: override.routeId,
+              routeName: override.routeName ?? (segment.lineLabel ?? '').trim(),
+              direction: undefined,
+            };
+            const breakdown = this.scorer.score(
+              {
+                provider: provider.type,
+                station,
+                route,
+              },
+              segment,
+            );
+            providerCandidates.push({
+              provider: provider.type,
+              station,
+              route,
+              score: breakdown.total + 20,
+              scoreBreakdown: {
+                arsMatch: breakdown.arsMatch,
+                lineMatch: breakdown.lineMatch,
+                distanceScore: breakdown.distanceScore,
+                stationNameScore: breakdown.stationNameScore,
+                providerPriority: breakdown.providerPriority,
+                penalty: breakdown.penalty,
+              },
+            });
+            diagnostics.providerRouteCounts[provider.type] += 1;
+            this.logger.logProviderStage({
+              provider: provider.type,
+              stationCandidateCount: 0,
+              overrideCandidateUsed: true,
+              overrideStationId: override.stationId,
+              overrideRouteId: override.routeId,
+            });
+            continue;
+          }
+
           const syntheticCandidate = this.buildSyntheticProviderCandidate(provider.type, segment);
           if (syntheticCandidate) {
             providerCandidates.push(syntheticCandidate);

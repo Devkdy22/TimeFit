@@ -205,6 +205,11 @@ export class RealtimeBusService {
       return direct;
     }
 
+    const routeIdFallback = await this.tryRouteIdFallback(segment, providers, failedProviders, resolved.providerCandidates.length);
+    if (routeIdFallback) {
+      return routeIdFallback;
+    }
+
     const stale = this.etaCache.getStale(segment);
     if (stale) {
       this.logger.logCacheHit('stale', {
@@ -334,6 +339,65 @@ export class RealtimeBusService {
     this.logger.logSelected('SEOUL');
     this.logger.logEta(result.status, result.etaMinutes);
     return result;
+  }
+
+  private async tryRouteIdFallback(
+    segment: BusSegmentInput,
+    providers: BusProvider[],
+    failedProviders: Array<{ provider: BusProviderType; reason: RealtimeBusReasonCode }>,
+    candidateCount: number,
+  ): Promise<ResolvedRealtimeBus | null> {
+    const startStationId = (segment.startStationId ?? '').trim();
+    const busRouteId = (segment.busRouteId ?? '').trim();
+    if (!startStationId || !busRouteId) {
+      return null;
+    }
+
+    for (const provider of providers) {
+      try {
+        const arrival = await provider.getArrival({
+          stationId: startStationId,
+          routeId: busRouteId,
+        });
+        if (!arrival?.etaMinutes) {
+          continue;
+        }
+        const result: ResolvedRealtimeBus = {
+          status: arrival.etaMinutes >= 8 ? 'DELAYED' : 'LIVE',
+          etaMinutes: arrival.etaMinutes,
+          etaSeconds: arrival.etaSeconds,
+          provider: provider.type,
+          confidence: 45,
+          updatedAt: arrival.updatedAt,
+          reasonCode: 'PROVIDER_ID_MAPPING_FAILED',
+          ...(this.buildDebug(segment, {
+            selectedProvider: provider.type,
+            selectedScore: 45,
+            failedProviders,
+            reasonCode: 'PROVIDER_ID_MAPPING_FAILED',
+            candidateCount,
+          }) ?? {}),
+        };
+        this.mappingCache.set(segment, {
+          provider: provider.type,
+          providerStationId: startStationId,
+          providerRouteId: busRouteId,
+          confidence: 45,
+          routeName: segment.lineLabel ?? busRouteId,
+        });
+        this.etaCache.set(segment, { ...result, provider: provider.type });
+        this.logger.logSelected(provider.type);
+        this.logger.logEta(result.status, result.etaMinutes);
+        return result;
+      } catch (error) {
+        failedProviders.push({
+          provider: provider.type,
+          reason: this.isTimeout(error) ? 'PROVIDER_API_TIMEOUT' : 'PROVIDER_ID_MAPPING_FAILED',
+        });
+      }
+    }
+
+    return null;
   }
 
   private buildDebug(

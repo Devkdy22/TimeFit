@@ -9,7 +9,8 @@ export class StationMatcher {
 
     let normalized = name;
     normalized = normalized.replace(/\([^)]*\)/g, ' ');
-    normalized = normalized.replace(/중앙차로|출구|백화점|건너편|사거리|앞|중/g, ' ');
+    // Keep core toponyms such as "사거리"; over-trimming lowers match rate.
+    normalized = normalized.replace(/중앙차로|출구|백화점|건너편|앞|중/g, ' ');
     normalized = normalized.replace(/[0-9]+번/g, ' ');
     normalized = normalized.replace(/[.·,]/g, ' ');
     normalized = normalized.replace(/\s+/g, ' ').trim();

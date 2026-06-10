@@ -1,4 +1,4 @@
-import { BusStopMatcher } from '../../../../../src/modules/realtime/matchers/bus-stop.matcher';
+import { BusStopMatcher } from '../../../../src/modules/realtime/matchers/bus-stop.matcher';
 
 describe('BusStopMatcher', () => {
   it('returns stationId directly when provided', async () => {
@@ -17,4 +17,3 @@ describe('BusStopMatcher', () => {
     expect(result.routeNo).toBe('341');
   });
 });
-
