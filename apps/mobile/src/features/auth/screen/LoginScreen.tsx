@@ -16,8 +16,9 @@ export function LoginScreen() {
         return;
       }
       nav.goToRoutines();
-    } catch {
-      Alert.alert('로그인 실패', '잠시 후 다시 시도해주세요.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '잠시 후 다시 시도해주세요.';
+      Alert.alert('로그인 실패', message);
     }
   };
 
@@ -27,8 +28,8 @@ export function LoginScreen() {
 
       <View style={styles.centerArea}>
         <TimeyMascot size={110} expression="smile" />
-        <Text style={styles.title}>로그인하고 루틴을 저장해보세요</Text>
-        <Text style={styles.subtitle}>자주 가는 경로와 알림을 안전하게 보관할 수 있어요.</Text>
+        <Text style={styles.title}>루틴 저장은 로그인이 필요해요</Text>
+        <Text style={styles.subtitle}>타임이와 함께 자주 가는 경로, 알림, 장소를 안전하게 저장할 수 있어요.</Text>
       </View>
 
       <View style={styles.actions}>

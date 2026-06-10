@@ -5,6 +5,10 @@ export type Routine = {
   name: string;
   originName: string;
   destinationName: string;
+  originLat: number;
+  originLng: number;
+  destinationLat: number;
+  destinationLng: number;
   targetTime: string;
   timeMode: 'arrival' | 'departure';
   repeatDays: RoutineDay[];

@@ -18,6 +18,7 @@ export interface HomeViewProps {
   status: CommuteStatus;
   statusLabel: string;
   arrivalTime: string;
+  isArrivalConfigured: boolean;
   pickerTime: string;
   destination: string;
   headline: string;
@@ -46,6 +47,7 @@ export function HomeView({
   status,
   statusLabel,
   arrivalTime,
+  isArrivalConfigured,
   pickerTime,
   destination,
   headline,
@@ -93,6 +95,7 @@ export function HomeView({
 
           <TimeCard
             arrivalTime={arrivalTime}
+            isArrivalConfigured={isArrivalConfigured}
             pickerTime={pickerTime}
             destination={destination}
             status={status}

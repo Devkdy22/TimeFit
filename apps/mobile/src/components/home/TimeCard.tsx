@@ -7,6 +7,7 @@ import { TimeWheelPicker } from './TimeWheelPicker';
 
 interface TimeCardProps {
   arrivalTime: string;
+  isArrivalConfigured?: boolean;
   pickerTime?: string;
   destination: string;
   status: CommuteStatus;
@@ -59,6 +60,7 @@ const statusAppearance: Record<
 
 export function TimeCard({
   arrivalTime,
+  isArrivalConfigured: isArrivalConfiguredProp,
   pickerTime,
   destination,
   status,
@@ -74,7 +76,7 @@ export function TimeCard({
   const appearance = statusAppearance[status];
   const [pickerVisible, setPickerVisible] = useState(false);
   const initialPickerTime = pickerTime ?? (/\d{2}:\d{2}/.test(arrivalTime) ? arrivalTime : '19:00');
-  const isArrivalConfigured = /\d{2}:\d{2}/.test(arrivalTime);
+  const isArrivalConfigured = isArrivalConfiguredProp ?? /\d{2}:\d{2}/.test(arrivalTime);
   const isDestinationConfigured = !destination.includes('설정');
 
   return (
@@ -99,7 +101,9 @@ export function TimeCard({
           style={({ pressed }) => [styles.timePressable, { opacity: pressed ? 0.88 : 1 }]}
         >
           <View style={styles.timeActionRow}>
-            <Text style={styles.arrivalTime}>{arrivalTime}</Text>
+            <Text style={styles.arrivalTime} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82}>
+              {arrivalTime}
+            </Text>
             <View style={styles.timeActionMeta}>
               <View style={styles.timeActionChip}>
                 <Text style={styles.timeActionChipText}>
@@ -109,6 +113,16 @@ export function TimeCard({
             </View>
           </View>
         </Pressable>
+        {!isArrivalConfigured ? (
+          <View style={styles.timeHintBox}>
+            <Ionicons name="information-circle-outline" size={14} color="#2C8F8B" />
+            <Text style={styles.timeHintText}>
+              현재 시간으로 표시 중이에요.
+              {'\n'}
+              원하는 도착 시간을 설정해 주세요.
+            </Text>
+          </View>
+        ) : null}
 
         <Pressable
           onPress={onPressDestination}
@@ -226,7 +240,7 @@ const styles = StyleSheet.create({
   },
   timeActionRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'space-between',
     gap: 10,
   },
@@ -243,14 +257,34 @@ const styles = StyleSheet.create({
   },
   timeActionChipText: {
     fontFamily: 'Pretendard-SemiBold',
-    fontSize: 12,
+    fontSize: 11,
     color: '#426464',
   },
   arrivalTime: {
     fontFamily: 'Pretendard-SemiBold',
-    fontSize: 44,
+    fontSize: 38,
     color: colors.textPrimary,
     letterSpacing: 0.3,
+    flexShrink: 1,
+    marginRight: 8,
+  },
+  timeHintBox: {
+    marginTop: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#BFE5E2',
+    backgroundColor: '#F0FBFA',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  timeHintText: {
+    flex: 1,
+    fontFamily: 'Pretendard-Medium',
+    fontSize: 12,
+    color: '#2C6E6B',
   },
   destinationRow: {
     marginTop: 8,

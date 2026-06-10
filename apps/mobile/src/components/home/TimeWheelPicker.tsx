@@ -8,6 +8,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  TextInput,
   View,
   type ListRenderItemInfo,
 } from 'react-native';
@@ -238,6 +239,8 @@ export function TimeWheelPicker({ visible, initialTime, accentColor, onClose, on
   const parsed = useMemo(() => toTimeParts(initialTime), [initialTime]);
   const [hour, setHour] = useState(parsed.hour);
   const [minute, setMinute] = useState(parsed.minute);
+  const [editingPart, setEditingPart] = useState<'hour' | 'minute' | null>(null);
+  const [draftInput, setDraftInput] = useState('');
 
   useEffect(() => {
     if (!visible) {
@@ -245,7 +248,34 @@ export function TimeWheelPicker({ visible, initialTime, accentColor, onClose, on
     }
     setHour(parsed.hour);
     setMinute(parsed.minute);
+    setEditingPart(null);
+    setDraftInput('');
   }, [parsed.hour, parsed.minute, visible]);
+
+  const startEditing = (part: 'hour' | 'minute') => {
+    setEditingPart(part);
+    const value = part === 'hour' ? hour : minute;
+    setDraftInput(String(value).padStart(2, '0'));
+  };
+
+  const applyInput = () => {
+    if (!editingPart) {
+      return;
+    }
+    const numeric = Number(draftInput);
+    if (Number.isNaN(numeric)) {
+      setEditingPart(null);
+      setDraftInput('');
+      return;
+    }
+    if (editingPart === 'hour') {
+      setHour(Math.max(0, Math.min(23, numeric)));
+    } else {
+      setMinute(Math.max(0, Math.min(59, numeric)));
+    }
+    setEditingPart(null);
+    setDraftInput('');
+  };
 
   return (
     <Modal transparent visible={visible} animationType="fade" onRequestClose={onClose}>
@@ -285,6 +315,54 @@ export function TimeWheelPicker({ visible, initialTime, accentColor, onClose, on
                 onPreviewChange={setMinute}
               />
             </View>
+          </View>
+
+          <View style={styles.inputRow}>
+            <Pressable
+              onPress={() => startEditing('hour')}
+              style={[
+                styles.timePartButton,
+                editingPart === 'hour' ? { borderColor: accentColor } : null,
+              ]}
+            >
+              {editingPart === 'hour' ? (
+                <TextInput
+                  value={draftInput}
+                  onChangeText={(text) => setDraftInput(text.replace(/[^\d]/g, '').slice(0, 2))}
+                  onBlur={applyInput}
+                  onSubmitEditing={applyInput}
+                  keyboardType="number-pad"
+                  autoFocus
+                  maxLength={2}
+                  style={styles.timePartInput}
+                />
+              ) : (
+                <Text style={styles.timePartText}>{String(hour).padStart(2, '0')}</Text>
+              )}
+            </Pressable>
+            <Text style={styles.inputColon}>:</Text>
+            <Pressable
+              onPress={() => startEditing('minute')}
+              style={[
+                styles.timePartButton,
+                editingPart === 'minute' ? { borderColor: accentColor } : null,
+              ]}
+            >
+              {editingPart === 'minute' ? (
+                <TextInput
+                  value={draftInput}
+                  onChangeText={(text) => setDraftInput(text.replace(/[^\d]/g, '').slice(0, 2))}
+                  onBlur={applyInput}
+                  onSubmitEditing={applyInput}
+                  keyboardType="number-pad"
+                  autoFocus
+                  maxLength={2}
+                  style={styles.timePartInput}
+                />
+              ) : (
+                <Text style={styles.timePartText}>{String(minute).padStart(2, '0')}</Text>
+              )}
+            </Pressable>
           </View>
         </View>
       </View>
@@ -389,5 +467,41 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
     includeFontPadding: false,
     textAlignVertical: 'center',
+  },
+  inputRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  timePartButton: {
+    minWidth: 74,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#D7E5E4',
+    backgroundColor: '#F8FCFC',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  timePartText: {
+    fontFamily: 'Pretendard-SemiBold',
+    fontSize: 26,
+    color: colors.textPrimary,
+  },
+  timePartInput: {
+    minWidth: 52,
+    textAlign: 'center',
+    fontFamily: 'Pretendard-SemiBold',
+    fontSize: 26,
+    color: colors.textPrimary,
+    paddingVertical: 0,
+  },
+  inputColon: {
+    fontFamily: 'Pretendard-SemiBold',
+    fontSize: 28,
+    color: colors.textPrimary,
   },
 });

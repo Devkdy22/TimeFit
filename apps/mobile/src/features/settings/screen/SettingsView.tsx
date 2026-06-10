@@ -6,6 +6,7 @@ export interface SettingsViewProps {
   isNotificationEnabled: boolean;
   isLiveLocationEnabled: boolean;
   isLoggedIn: boolean;
+  loginEmail: string | null;
   onChangeNotification: (next: boolean) => void;
   onChangeLiveLocation: (next: boolean) => void;
   onToggleLogin: () => void;
@@ -17,6 +18,7 @@ export function SettingsView({
   isNotificationEnabled,
   isLiveLocationEnabled,
   isLoggedIn,
+  loginEmail,
   onChangeNotification,
   onChangeLiveLocation,
   onToggleLogin,
@@ -50,7 +52,7 @@ export function SettingsView({
       <ActionCard
         status={isLoggedIn ? 'relaxed' : 'warning'}
         title="계정"
-        description={isLoggedIn ? 'kim@timefit.app로 로그인됨' : '로그인하면 루틴/기록을 저장할 수 있어요'}
+        description={isLoggedIn ? `${loginEmail ?? '계정'}로 로그인됨` : '로그인하면 루틴/기록을 저장할 수 있어요'}
       >
         <View style={styles.accountRow}>
           <StatusBadge status={isLoggedIn ? 'relaxed' : 'warning'} label={isLoggedIn ? '연결됨' : '미연결'} />

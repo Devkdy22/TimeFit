@@ -23,7 +23,7 @@ export function LoginRequiredModal({ visible, onClose }: LoginRequiredModalProps
         status="warning"
         onPress={() => {
           onClose();
-          nav.goToSettings();
+          nav.goToLogin();
         }}
       />
 

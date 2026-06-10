@@ -22,6 +22,134 @@ function resolveApiBaseUrl() {
 }
 
 const API_BASE_URL = resolveApiBaseUrl();
+const REFRESH_TIMEOUT_MS = 10_000;
+const DEV_MODE = typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
+
+type AuthMode = 'protected' | 'public';
+
+interface AuthSessionBridge {
+  getAccessToken: () => string | null;
+  getSessionGeneration: () => number;
+  refreshSession: (signal: AbortSignal | null | undefined, generation: number) => Promise<boolean>;
+  onAuthFailure: (reason: 'REFRESH_FAILED' | 'REFRESH_TIMEOUT' | 'REFRESH_ABORTED') => void;
+  onRefreshTimeout?: (scope: 'authorized_fetch' | 'hydration') => void;
+}
+
+const AUTH_PUBLIC_ALLOWLIST: ReadonlyArray<{ method?: string; pathPrefix: string }> = [
+  { method: 'GET', pathPrefix: '/health' },
+  { method: 'POST', pathPrefix: '/auth/social/login' },
+  { method: 'POST', pathPrefix: '/auth/refresh' },
+  { method: 'POST', pathPrefix: '/auth/logout' },
+  { method: 'GET', pathPrefix: '/kakao-local/' },
+  { method: 'GET', pathPrefix: '/kakao-local' },
+];
+
+let authBridge: AuthSessionBridge | null = null;
+let refreshInFlight: Promise<void> | null = null;
+let authFailureNotified = false;
+let refreshAbortController: AbortController | null = null;
+
+export function configureAuthSessionBridge(next: AuthSessionBridge | null): void {
+  authBridge = next;
+  if (next?.getAccessToken()) {
+    authFailureNotified = false;
+  }
+}
+
+export function abortPendingAuthRefresh(): void {
+  if (refreshAbortController) {
+    refreshAbortController.abort();
+  }
+}
+
+export type SocialProvider = 'google' | 'kakao' | 'naver';
+
+export interface AuthTokens {
+  accessToken: string;
+  refreshToken: string;
+  tokenType: 'Bearer';
+  expiresIn: number;
+  userId: string;
+}
+
+export interface AuthProfile {
+  id: string;
+  name: string | null;
+  email: string | null;
+  provider: SocialProvider | null;
+}
+
+export interface RoutineListItem {
+  id: string;
+  userId: string;
+  title: string;
+  origin: string;
+  destination: string;
+  weekdays: number[];
+  arrivalTime: string;
+  active: boolean;
+  lastTriggeredAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateRoutineRequest {
+  title: string;
+  origin: {
+    name: string;
+    lat: number;
+    lng: number;
+  };
+  destination: {
+    name: string;
+    lat: number;
+    lng: number;
+  };
+  weekdays: number[];
+  arrivalTime: string;
+  savedRoute?: {
+    id: string;
+    name: string;
+    busRouteId?: string;
+    busStationId?: string;
+    routeType?: 'subway-heavy' | 'bus-heavy' | 'walking-heavy' | 'mixed' | 'bus' | 'subway' | 'car';
+    estimatedTravelMinutes: number;
+    delayRisk: number;
+    transferCount: number;
+    walkingMinutes: number;
+  };
+  expoPushToken?: string;
+}
+
+export interface SavedPlaceItem {
+  id: string;
+  userId: string;
+  label: string;
+  address: string;
+  lat: number;
+  lng: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateSavedPlaceRequest {
+  label: string;
+  address: string;
+  lat: number;
+  lng: number;
+}
+
+export class ApiRequestError extends Error {
+  status: number;
+  code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = 'ApiRequestError';
+    this.status = status;
+    this.code = code;
+  }
+}
 
 export interface RecommendLocation {
   name: string;
@@ -274,6 +402,178 @@ async function readApiEnvelope<T>(response: Response): Promise<T> {
   }
 
   return payload.data;
+}
+
+function pathFromApiUrl(url: string): string | null {
+  if (!url.startsWith(API_BASE_URL)) {
+    return null;
+  }
+  try {
+    const parsed = new URL(url);
+    const pathname = parsed.pathname || '/';
+    if (pathname.length > 1 && pathname.endsWith('/')) {
+      return pathname.slice(0, -1);
+    }
+    return pathname;
+  } catch {
+    const path = url.slice(API_BASE_URL.length).split('?')[0] ?? '';
+    const normalized = path.startsWith('/') ? path : `/${path}`;
+    if (normalized.length > 1 && normalized.endsWith('/')) {
+      return normalized.slice(0, -1);
+    }
+    return normalized;
+  }
+}
+
+function isPublicAllowlisted(url: string, method: string): boolean {
+  const path = pathFromApiUrl(url);
+  if (!path) {
+    return true;
+  }
+  const normalizedMethod = method.toUpperCase();
+  return AUTH_PUBLIC_ALLOWLIST.some(
+    (rule) =>
+      path.startsWith(rule.pathPrefix) &&
+      (rule.method === undefined || rule.method.toUpperCase() === normalizedMethod),
+  );
+}
+
+function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): AbortSignal | undefined {
+  const active = signals.filter((signal): signal is AbortSignal => Boolean(signal));
+  if (active.length === 0) {
+    return undefined;
+  }
+
+  const aborted = active.find((signal) => signal.aborted);
+  if (aborted) {
+    return aborted;
+  }
+
+  const controller = new AbortController();
+  const onAbort = () => {
+    controller.abort();
+    for (const signal of active) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  };
+  for (const signal of active) {
+    signal.addEventListener('abort', onAbort);
+  }
+
+  return controller.signal;
+}
+
+async function runRefreshWithTimeout(signal?: AbortSignal | null): Promise<void> {
+  if (!authBridge) {
+    throw new Error('auth_bridge_missing');
+  }
+
+  if (!refreshInFlight) {
+    refreshInFlight = (async () => {
+      const timeoutController = new AbortController();
+      refreshAbortController = new AbortController();
+      const capturedGeneration = authBridge.getSessionGeneration();
+      const timeoutId = setTimeout(() => {
+        timeoutController.abort();
+      }, REFRESH_TIMEOUT_MS);
+      try {
+        const mergedSignal = mergeAbortSignals([signal, timeoutController.signal, refreshAbortController.signal]);
+        const applied = await authBridge.refreshSession(mergedSignal, capturedGeneration);
+        if (!applied) {
+          throw new Error('refresh_result_discarded');
+        }
+        authFailureNotified = false;
+      } catch (error) {
+        if (timeoutController.signal.aborted) {
+          authBridge.onRefreshTimeout?.('authorized_fetch');
+        }
+        throw error;
+      } finally {
+        clearTimeout(timeoutId);
+        refreshAbortController = null;
+      }
+    })().finally(() => {
+      refreshInFlight = null;
+    });
+  }
+
+  return refreshInFlight;
+}
+
+interface AuthorizedFetchOptions extends RequestInit {
+  authMode?: AuthMode;
+  authRetryCount?: 0 | 1;
+}
+
+async function authorizedFetch(url: string, options?: AuthorizedFetchOptions): Promise<Response> {
+  const method = (options?.method ?? 'GET').toUpperCase();
+  const authMode = options?.authMode ?? 'protected';
+
+  if (authMode === 'public' && DEV_MODE && !isPublicAllowlisted(url, method)) {
+    console.warn('[TimeFitApi][AuthPolicy] Public call is not allowlisted.', { method, url });
+  }
+
+  const headers = new Headers(options?.headers);
+  const accessToken = authBridge?.getAccessToken() ?? null;
+  if (authMode === 'protected' && !accessToken) {
+    throw new Error('auth_required');
+  }
+  if (authMode === 'protected' && accessToken) {
+    headers.set('Authorization', `Bearer ${accessToken}`);
+  }
+
+  const response = await fetch(url, {
+    ...options,
+    headers,
+  });
+
+  if (authMode !== 'protected') {
+    return response;
+  }
+
+  const retryCount = options?.authRetryCount ?? 0;
+  const hasAbortSignal = Boolean(options?.signal);
+  if (response.status !== 401 || retryCount >= 1 || !authBridge) {
+    return response;
+  }
+
+  if (hasAbortSignal && options?.signal?.aborted) {
+    return response;
+  }
+
+  try {
+    await runRefreshWithTimeout(options?.signal);
+  } catch (error) {
+    if (options?.signal?.aborted) {
+      throw error;
+    }
+    if (!authFailureNotified) {
+      authFailureNotified = true;
+      if (options?.signal?.aborted) {
+        authBridge.onAuthFailure('REFRESH_ABORTED');
+      } else if (error instanceof Error && error.name === 'AbortError') {
+        authBridge.onAuthFailure('REFRESH_TIMEOUT');
+      } else {
+        authBridge.onAuthFailure('REFRESH_FAILED');
+      }
+    }
+    throw error;
+  }
+
+  const retryHeaders = new Headers(options?.headers);
+  const refreshedAccessToken = authBridge.getAccessToken();
+  if (!refreshedAccessToken) {
+    return response;
+  }
+  if (refreshedAccessToken) {
+    retryHeaders.set('Authorization', `Bearer ${refreshedAccessToken}`);
+  }
+
+  return fetch(url, {
+    ...options,
+    headers: retryHeaders,
+    authRetryCount: undefined,
+  } as RequestInit);
 }
 
 export async function getHealth(): Promise<{ status: string; service: string }> {
@@ -716,14 +1016,18 @@ function mapOdsayPathToRoute(
         label?: string;
       }>;
       const lane = segment.lane?.[0];
+      const busRouteIdResolved =
+        mode === 'bus'
+          ? readText(lane?.busRouteId) ??
+            readText(lane?.routeId) ??
+            readText(lane?.busLocalBlID) ??
+            readText(lane?.busID)
+          : undefined;
       const lineId =
         mode === 'subway'
           ? readText(lane?.subwayCode) ?? readText(lane?.subwayID) ?? readText(lane?.subwayId)
           : mode === 'bus'
-            ? readText(lane?.busID) ??
-              readText(lane?.busLocalBlID) ??
-              readText(lane?.busRouteId) ??
-              readText(lane?.routeId)
+            ? busRouteIdResolved ?? readText(lane?.busID)
             : undefined;
       const startStationId = readText(segment.startID) ?? readText(segment.stationID);
       const endStationId = readText(segment.endID) ?? readText(segment.stationID2);
@@ -759,7 +1063,7 @@ function mapOdsayPathToRoute(
         endName: segment.endName,
         startStationId: startStationId ?? undefined,
         endStationId: endStationId ?? undefined,
-        busRouteId: mode === 'bus' ? lineId : undefined,
+        busRouteId: mode === 'bus' ? busRouteIdResolved : undefined,
         startLat: segment.startY,
         startLng: segment.startX,
         endLat: segment.endY,
@@ -1047,4 +1351,195 @@ export async function getNearbyPoiLocationInfoViaProxy(
   });
 
   return data;
+}
+
+export async function loginWithSocialProvider(input: {
+  provider: SocialProvider;
+  idToken?: string;
+  accessToken?: string;
+  authorizationCode?: string;
+  redirectUri?: string;
+  state?: string;
+}): Promise<AuthTokens> {
+  const response = await authorizedFetch(`${API_BASE_URL}/auth/social/login`, {
+    method: 'POST',
+    authMode: 'public',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(`Social login failed: ${response.status}`);
+  }
+  return readApiEnvelope<AuthTokens>(response);
+}
+
+export async function refreshAuthSession(
+  refreshToken: string,
+  signal?: AbortSignal | null,
+): Promise<AuthTokens> {
+  const response = await authorizedFetch(`${API_BASE_URL}/auth/refresh`, {
+    method: 'POST',
+    authMode: 'public',
+    signal,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken }),
+  });
+  if (!response.ok) {
+    throw new Error(`Refresh failed: ${response.status}`);
+  }
+  return readApiEnvelope<AuthTokens>(response);
+}
+
+export async function logoutAuthSession(refreshToken: string, accessToken?: string): Promise<void> {
+  await authorizedFetch(`${API_BASE_URL}/auth/logout`, {
+    method: 'POST',
+    authMode: 'public',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+    },
+    body: JSON.stringify({ refreshToken }),
+  });
+}
+
+export async function getMyAuthProfile(accessToken: string): Promise<AuthProfile> {
+  const response = await authorizedFetch(`${API_BASE_URL}/auth/me`, {
+    method: 'GET',
+    authMode: 'protected',
+    headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : undefined,
+  });
+  if (!response.ok) {
+    throw new Error(`Get auth profile failed: ${response.status}`);
+  }
+
+  const data = await readApiEnvelope<{
+    id?: string;
+    name?: string | null;
+    email?: string | null;
+    provider?: SocialProvider | null;
+    user?: {
+      id?: string;
+      name?: string | null;
+      email?: string | null;
+      provider?: SocialProvider | null;
+    };
+  }>(response);
+
+  const source = data.user ?? data;
+  if (!source.id) {
+    throw new Error('Auth profile is missing id.');
+  }
+
+  return {
+    id: source.id,
+    name: source.name ?? null,
+    email: source.email ?? null,
+    provider: source.provider ?? null,
+  };
+}
+
+export async function getRoutines(signal?: AbortSignal): Promise<RoutineListItem[]> {
+  const response = await authorizedFetch(`${API_BASE_URL}/routines`, {
+    method: 'GET',
+    authMode: 'protected',
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Get routines failed: ${response.status}`);
+  }
+
+  return readApiEnvelope<RoutineListItem[]>(response);
+}
+
+export async function createRoutine(
+  input: CreateRoutineRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<RoutineListItem> {
+  const response = await authorizedFetch(`${API_BASE_URL}/routines`, {
+    method: 'POST',
+    authMode: 'protected',
+    signal,
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    let code: string | undefined;
+    try {
+      const errorPayload = (await response.json()) as {
+        error?: { code?: string; message?: string };
+      };
+      code = errorPayload.error?.code;
+    } catch {
+      code = undefined;
+    }
+    throw new ApiRequestError(`Create routine failed: ${response.status}`, response.status, code);
+  }
+
+  return readApiEnvelope<RoutineListItem>(response);
+}
+
+export async function getMyPlaces(signal?: AbortSignal): Promise<SavedPlaceItem[]> {
+  const response = await authorizedFetch(`${API_BASE_URL}/me/places`, {
+    method: 'GET',
+    authMode: 'protected',
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Get saved places failed: ${response.status}`);
+  }
+
+  return readApiEnvelope<SavedPlaceItem[]>(response);
+}
+
+export async function createMyPlace(
+  input: CreateSavedPlaceRequest,
+  idempotencyKey: string,
+  signal?: AbortSignal,
+): Promise<SavedPlaceItem> {
+  const response = await authorizedFetch(`${API_BASE_URL}/me/places`, {
+    method: 'POST',
+    authMode: 'protected',
+    signal,
+    headers: {
+      'Content-Type': 'application/json',
+      'Idempotency-Key': idempotencyKey,
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    let code: string | undefined;
+    try {
+      const errorPayload = (await response.json()) as {
+        error?: { code?: string; message?: string };
+      };
+      code = errorPayload.error?.code;
+    } catch {
+      code = undefined;
+    }
+    throw new ApiRequestError(`Create saved place failed: ${response.status}`, response.status, code);
+  }
+
+  return readApiEnvelope<SavedPlaceItem>(response);
+}
+
+export async function deleteMyPlace(id: string, signal?: AbortSignal): Promise<{ id: string }> {
+  const response = await authorizedFetch(`${API_BASE_URL}/me/places/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    authMode: 'protected',
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new Error(`Delete saved place failed: ${response.status}`);
+  }
+
+  return readApiEnvelope<{ id: string }>(response);
 }

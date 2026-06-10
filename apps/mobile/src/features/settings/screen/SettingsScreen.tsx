@@ -5,7 +5,7 @@ import { useNavigationHelper } from '../../../utils/navigation';
 
 export function SettingsScreen() {
   const nav = useNavigationHelper();
-  const { isLoggedIn, login, logout } = useAuth();
+  const { isLoggedIn, logout, profile } = useAuth();
   const { isNotificationEnabled, isLiveLocationEnabled, setNotificationEnabled, setLiveLocationEnabled } = useSettingsState();
 
   return (
@@ -13,6 +13,7 @@ export function SettingsScreen() {
       isNotificationEnabled={isNotificationEnabled}
       isLiveLocationEnabled={isLiveLocationEnabled}
       isLoggedIn={isLoggedIn}
+      loginEmail={profile?.email ?? null}
       onChangeNotification={setNotificationEnabled}
       onChangeLiveLocation={setLiveLocationEnabled}
       onToggleLogin={() => {
@@ -20,7 +21,7 @@ export function SettingsScreen() {
           logout();
           return;
         }
-        void login('google');
+        nav.goToLogin();
       }}
       onPressTestMap={nav.goToTransit}
       onPressOnboarding={nav.goToOnboarding}
