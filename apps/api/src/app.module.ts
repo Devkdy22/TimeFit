@@ -16,6 +16,8 @@ import { AppConfigService } from './common/config/app-config.service';
 import type { AppEnv } from './common/config/env.schema';
 import { CoreModule } from './core/core.module';
 import { RealtimeModule } from './modules/realtime/realtime.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { SavedPlacesModule } from './modules/saved-places/saved-places.module';
 
 @Module({
   imports: [
@@ -34,6 +36,8 @@ import { RealtimeModule } from './modules/realtime/realtime.module';
     TripsModule,
     RoutinesModule,
     RealtimeModule,
+    AuthModule,
+    SavedPlacesModule,
   ],
   controllers: [HealthController],
   providers: [

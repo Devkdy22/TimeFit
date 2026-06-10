@@ -134,4 +134,24 @@ export class AppConfigService {
   get redisUrl() {
     return this.configService.get('REDIS_URL', { infer: true });
   }
+
+  get googleClientId() {
+    return this.configService.get('GOOGLE_CLIENT_ID', { infer: true });
+  }
+
+  get googleClientSecret() {
+    return this.configService.get('GOOGLE_CLIENT_SECRET', { infer: true });
+  }
+
+  get kakaoClientSecret() {
+    return this.configService.get('KAKAO_CLIENT_SECRET', { infer: true });
+  }
+
+  get naverClientId() {
+    return this.configService.get('NAVER_CLIENT_ID', { infer: true });
+  }
+
+  get naverClientSecret() {
+    return this.configService.get('NAVER_CLIENT_SECRET', { infer: true });
+  }
 }

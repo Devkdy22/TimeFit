@@ -168,3 +168,18 @@ model OdsayUsageDaily {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 }
+
+model SavedPlace {
+  id        String   @id @default(cuid())
+  userId    String
+  label     String
+  normalizedLabel String
+  address   String
+  lat       Float
+  lng       Float
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@unique([userId, normalizedLabel])
+}

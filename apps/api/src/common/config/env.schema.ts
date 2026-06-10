@@ -31,6 +31,11 @@ const envSchema = z
     RATE_LIMIT_TTL_MS: z.coerce.number().default(60000),
     RATE_LIMIT_MAX: z.coerce.number().default(60),
     REDIS_URL: z.string().optional(),
+    GOOGLE_CLIENT_ID: z.string().optional().default(''),
+    GOOGLE_CLIENT_SECRET: z.string().optional().default(''),
+    KAKAO_CLIENT_SECRET: z.string().optional().default(''),
+    NAVER_CLIENT_ID: z.string().optional().default(''),
+    NAVER_CLIENT_SECRET: z.string().optional().default(''),
   })
   .passthrough();
 

@@ -1,4 +1,4 @@
-import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { ForbiddenException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { SafeLogger } from '../../../common/logger/safe-logger.service';
 import { NotificationService } from '../../notifications/services/notification.service';
 import { RecommendationService } from '../../recommendation/services/recommendation.service';
@@ -31,9 +31,9 @@ export class RoutinesService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  createRoutine(input: CreateRoutineDto): RoutineEntity {
+  createRoutine(userId: string, input: CreateRoutineDto): RoutineEntity {
     return this.routinesRepository.create({
-      userId: input.userId,
+      userId,
       title: input.title,
       origin: input.origin,
       destination: input.destination,
@@ -53,8 +53,11 @@ export class RoutinesService implements OnModuleInit, OnModuleDestroy {
     return this.routinesRepository.findByUser(userId);
   }
 
-  async runRoutineNow(routineId: string) {
+  async runRoutineNow(userId: string, routineId: string) {
     const routine = this.routinesRepository.findById(routineId);
+    if (routine.userId !== userId) {
+      throw new ForbiddenException('You do not have access to this routine');
+    }
     return this.executeRoutine(routine, new Date());
   }
 

@@ -68,9 +68,6 @@ class SavedRouteDto {
 
 export class CreateRoutineDto {
   @IsString()
-  userId!: string;
-
-  @IsString()
   title!: string;
 
   @ValidateNested()
