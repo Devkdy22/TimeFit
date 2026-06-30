@@ -1,7 +1,16 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 import { useAuth } from '../auth/context';
-import { createMyPlace, createRoutine, deleteMyPlace, getMyPlaces, getRoutines } from '../../services/api/client';
+import {
+  createMyPlace,
+  createRoutine,
+  deleteMyPlace,
+  deleteRoutine as deleteRoutineApi,
+  getMyPlaces,
+  getRoutines,
+  updateRoutine as updateRoutineApi,
+} from '../../services/api/client';
+import type { RoutineListItem } from '../../services/api/client';
 import type { Routine, RoutineDay } from './model/types';
 
 export interface SavedPlace {
@@ -12,61 +21,6 @@ export interface SavedPlace {
   longitude: number;
   updatedAt: string;
 }
-
-const initialRoutines: Routine[] = [
-  {
-    id: 'routine-1',
-    name: '출근',
-    originName: '집',
-    destinationName: '회사',
-    originLat: 37.5665,
-    originLng: 126.978,
-    destinationLat: 37.4979,
-    destinationLng: 127.0276,
-    targetTime: '08:50',
-    timeMode: 'arrival',
-    repeatDays: ['mon', 'tue', 'wed', 'thu', 'fri'],
-    notificationEnabled: true,
-    notificationMinutesBefore: 10,
-    favorite: true,
-    lastUsedAt: new Date().toISOString(),
-  },
-  {
-    id: 'routine-2',
-    name: '헬스장',
-    originName: '회사',
-    destinationName: '헬스장',
-    originLat: 37.4979,
-    originLng: 127.0276,
-    destinationLat: 37.5013,
-    destinationLng: 127.0396,
-    targetTime: '19:20',
-    timeMode: 'departure',
-    repeatDays: ['mon', 'wed', 'fri'],
-    notificationEnabled: false,
-    notificationMinutesBefore: 15,
-    favorite: false,
-  },
-];
-
-const initialSavedPlaces: SavedPlace[] = [
-  {
-    id: 'saved-place-home',
-    label: '집',
-    address: '서울특별시 중구 세종대로 110',
-    latitude: 37.5665,
-    longitude: 126.978,
-    updatedAt: new Date().toISOString(),
-  },
-  {
-    id: 'saved-place-office',
-    label: '회사',
-    address: '서울특별시 강남구 테헤란로 212',
-    latitude: 37.498,
-    longitude: 127.0276,
-    updatedAt: new Date().toISOString(),
-  },
-];
 
 interface RoutineContextValue {
   routines: Routine[];
@@ -87,9 +41,9 @@ interface RoutineContextValue {
     favorite: boolean;
     signal?: AbortSignal;
   }) => Promise<Routine>;
-  toggleFavorite: (id: string) => void;
-  updateRoutine: (id: string, patch: Partial<Routine>) => void;
-  removeRoutine: (id: string) => void;
+  toggleFavorite: (id: string) => Promise<void>;
+  updateRoutine: (id: string, patch: Partial<Routine>) => Promise<void>;
+  removeRoutine: (id: string) => Promise<void>;
   addSavedPlace: (place: Omit<SavedPlace, 'id' | 'updatedAt'>) => Promise<SavedPlace>;
   removeSavedPlace: (id: string) => Promise<void>;
 }
@@ -98,11 +52,24 @@ const RoutineContext = createContext<RoutineContextValue | null>(null);
 
 export function RoutineProvider({ children }: { children: ReactNode }) {
   const { isLoggedIn, profile, getSessionGeneration } = useAuth();
-  const [routines, setRoutines] = useState<Routine[]>(initialRoutines);
-  const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>(initialSavedPlaces);
+  const [routines, setRoutines] = useState<Routine[]>([]);
+  const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>([]);
   const createInFlightRef = useRef<
     Map<string, { key: string; promise: Promise<Routine> }>
   >(new Map());
+  const savedPlaceCreateInFlightRef = useRef<
+    Map<string, { key: string; promise: Promise<SavedPlace> }>
+  >(new Map());
+
+  useEffect(() => {
+    if (isLoggedIn && profile?.id) {
+      return;
+    }
+    createInFlightRef.current.clear();
+    savedPlaceCreateInFlightRef.current.clear();
+    setRoutines([]);
+    setSavedPlaces([]);
+  }, [isLoggedIn, profile?.id]);
 
   useEffect(() => {
     if (!isLoggedIn || !profile?.id) {
@@ -116,44 +83,7 @@ export function RoutineProvider({ children }: { children: ReactNode }) {
         if (controller.signal.aborted) {
           return;
         }
-        const mapped: Routine[] = remote.map((item) => ({
-          id: item.id,
-          name: item.title,
-          originName: item.origin,
-          destinationName: item.destination,
-          originLat: 0,
-          originLng: 0,
-          destinationLat: 0,
-          destinationLng: 0,
-          targetTime: item.arrivalTime,
-          timeMode: 'arrival',
-          repeatDays: item.weekdays
-            .map((weekday) => {
-              switch (weekday) {
-                case 0:
-                  return 'sun';
-                case 1:
-                  return 'mon';
-                case 2:
-                  return 'tue';
-                case 3:
-                  return 'wed';
-                case 4:
-                  return 'thu';
-                case 5:
-                  return 'fri';
-                case 6:
-                  return 'sat';
-                default:
-                  return null;
-              }
-            })
-            .filter((day): day is Routine['repeatDays'][number] => day !== null),
-          notificationEnabled: true,
-          notificationMinutesBefore: 10,
-          favorite: false,
-          lastUsedAt: item.lastTriggeredAt,
-        }));
+        const mapped: Routine[] = remote.map(routineFromRemote);
         setRoutines(mapped);
       } catch (error) {
         if (controller.signal.aborted) {
@@ -295,6 +225,10 @@ export function RoutineProvider({ children }: { children: ReactNode }) {
               },
               weekdays: input.repeatDays.map((day) => dayToWeekdayIndex(day)),
               arrivalTime: input.targetTime.trim(),
+              notificationEnabled: input.notificationEnabled,
+              notificationMinutesBefore: input.notificationMinutesBefore,
+              favorite: input.favorite,
+              active: true,
             },
             idempotencyKey,
             input.signal,
@@ -307,23 +241,24 @@ export function RoutineProvider({ children }: { children: ReactNode }) {
           const mapped: Routine = {
             id: created.id,
             name: created.title,
-            originName: created.origin,
-            destinationName: created.destination,
-            originLat: input.originLat,
-            originLng: input.originLng,
-            destinationLat: input.destinationLat,
-            destinationLng: input.destinationLng,
+            originName: created.origin.name,
+            destinationName: created.destination.name,
+            originLat: created.origin.lat,
+            originLng: created.origin.lng,
+            destinationLat: created.destination.lat,
+            destinationLng: created.destination.lng,
             targetTime: created.arrivalTime,
             timeMode: 'arrival',
             repeatDays: created.weekdays
               .map((weekday) => weekdayIndexToDay(weekday))
               .filter((day): day is RoutineDay => day !== null),
-            notificationEnabled: input.notificationEnabled,
-            notificationMinutesBefore: input.notificationMinutesBefore,
-            favorite: input.favorite,
+            notificationEnabled: created.notificationEnabled,
+            notificationMinutesBefore: created.notificationMinutesBefore,
+            favorite: created.favorite,
+            active: created.active,
             lastUsedAt: created.lastTriggeredAt,
           };
-          setRoutines((prev) => [mapped, ...prev]);
+          setRoutines((prev) => [mapped, ...prev.filter((item) => item.id !== mapped.id)]);
           return mapped;
         })().finally(() => {
           createInFlightRef.current.delete(payloadFingerprint);
@@ -335,36 +270,90 @@ export function RoutineProvider({ children }: { children: ReactNode }) {
         });
         return requestPromise;
       },
-      toggleFavorite: (id) => {
-        setRoutines((prev) => prev.map((item) => (item.id === id ? { ...item, favorite: !item.favorite } : item)));
+      toggleFavorite: async (id) => {
+        const current = routines.find((item) => item.id === id);
+        if (!current) {
+          return;
+        }
+        const nextFavorite = !current.favorite;
+        setRoutines((prev) => prev.map((item) => (item.id === id ? { ...item, favorite: nextFavorite } : item)));
+        try {
+          const updated = await updateRoutineApi(id, { favorite: nextFavorite });
+          setRoutines((prev) => prev.map((item) => (item.id === id ? routineFromRemote(updated) : item)));
+        } catch (error) {
+          setRoutines((prev) => prev.map((item) => (item.id === id ? current : item)));
+          throw error;
+        }
       },
-      updateRoutine: (id, patch) => {
-        setRoutines((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+      updateRoutine: async (id, patch) => {
+        const current = routines.find((item) => item.id === id);
+        if (!current) {
+          return;
+        }
+        const optimistic = { ...current, ...patch };
+        setRoutines((prev) => prev.map((item) => (item.id === id ? optimistic : item)));
+        try {
+          const updated = await updateRoutineApi(id, routinePatchToRequest(optimistic, patch));
+          setRoutines((prev) => prev.map((item) => (item.id === id ? routineFromRemote(updated) : item)));
+        } catch (error) {
+          setRoutines((prev) => prev.map((item) => (item.id === id ? current : item)));
+          throw error;
+        }
       },
-      removeRoutine: (id) => {
+      removeRoutine: async (id) => {
+        const current = routines.find((item) => item.id === id);
         setRoutines((prev) => prev.filter((item) => item.id !== id));
+        try {
+          await deleteRoutineApi(id);
+        } catch (error) {
+          if (current) {
+            setRoutines((prev) => [current, ...prev.filter((item) => item.id !== id)]);
+          }
+          throw error;
+        }
       },
       addSavedPlace: async (place) => {
         const normalizedLabel = normalizeSavedPlaceLabelForRequest(place.label);
         const normalizedAddress = place.address.trim();
         if (isLoggedIn && profile?.id) {
-          const idempotencyKey = generateUuidV4();
-          const created = await createMyPlace({
+          const payloadFingerprint = stableStringify({
             label: normalizedLabel,
             address: normalizedAddress,
             lat: place.latitude,
             lng: place.longitude,
-          }, idempotencyKey);
-          const mapped: SavedPlace = {
-            id: created.id,
-            label: created.label,
-            address: created.address,
-            latitude: created.lat,
-            longitude: created.lng,
-            updatedAt: created.updatedAt,
-          };
-          setSavedPlaces((prev) => [mapped, ...prev.filter((item) => item.id !== mapped.id)]);
-          return mapped;
+          });
+          const existing = savedPlaceCreateInFlightRef.current.get(payloadFingerprint);
+          if (existing) {
+            return existing.promise;
+          }
+
+          const idempotencyKey = generateUuidV4();
+          const requestPromise = (async () => {
+            const created = await createMyPlace({
+              label: normalizedLabel,
+              address: normalizedAddress,
+              lat: place.latitude,
+              lng: place.longitude,
+            }, idempotencyKey);
+            const mapped: SavedPlace = {
+              id: created.id,
+              label: created.label,
+              address: created.address,
+              latitude: created.lat,
+              longitude: created.lng,
+              updatedAt: created.updatedAt,
+            };
+            setSavedPlaces((prev) => [mapped, ...prev.filter((item) => item.id !== mapped.id)]);
+            return mapped;
+          })().finally(() => {
+            savedPlaceCreateInFlightRef.current.delete(payloadFingerprint);
+          });
+
+          savedPlaceCreateInFlightRef.current.set(payloadFingerprint, {
+            key: idempotencyKey,
+            promise: requestPromise,
+          });
+          return requestPromise;
         }
 
         const local: SavedPlace = {
@@ -428,6 +417,89 @@ function weekdayIndexToDay(index: number): RoutineDay | null {
     default:
       return null;
   }
+}
+
+function routineFromRemote(item: RoutineListItem): Routine {
+  return {
+    id: item.id,
+    name: item.title,
+    originName: item.origin.name,
+    destinationName: item.destination.name,
+    originLat: item.origin.lat,
+    originLng: item.origin.lng,
+    destinationLat: item.destination.lat,
+    destinationLng: item.destination.lng,
+    targetTime: item.arrivalTime,
+    timeMode: 'arrival',
+    repeatDays: item.weekdays
+      .map((weekday) => weekdayIndexToDay(weekday))
+      .filter((day): day is RoutineDay => day !== null),
+    notificationEnabled: item.notificationEnabled,
+    notificationMinutesBefore: item.notificationMinutesBefore,
+    favorite: item.favorite,
+    active: item.active,
+    lastUsedAt: item.lastTriggeredAt,
+  };
+}
+
+function routinePatchToRequest(routine: Routine, patch: Partial<Routine>) {
+  const request: {
+    title?: string;
+    origin?: { name: string; lat: number; lng: number };
+    destination?: { name: string; lat: number; lng: number };
+    weekdays?: number[];
+    arrivalTime?: string;
+    notificationEnabled?: boolean;
+    notificationMinutesBefore?: number;
+    favorite?: boolean;
+    active?: boolean;
+  } = {};
+
+  if (patch.name !== undefined) {
+    request.title = routine.name.trim();
+  }
+  if (
+    patch.originName !== undefined ||
+    patch.originLat !== undefined ||
+    patch.originLng !== undefined
+  ) {
+    request.origin = {
+      name: routine.originName.trim(),
+      lat: routine.originLat,
+      lng: routine.originLng,
+    };
+  }
+  if (
+    patch.destinationName !== undefined ||
+    patch.destinationLat !== undefined ||
+    patch.destinationLng !== undefined
+  ) {
+    request.destination = {
+      name: routine.destinationName.trim(),
+      lat: routine.destinationLat,
+      lng: routine.destinationLng,
+    };
+  }
+  if (patch.repeatDays !== undefined) {
+    request.weekdays = routine.repeatDays.map((day) => dayToWeekdayIndex(day));
+  }
+  if (patch.targetTime !== undefined) {
+    request.arrivalTime = routine.targetTime.trim();
+  }
+  if (patch.notificationEnabled !== undefined) {
+    request.notificationEnabled = routine.notificationEnabled;
+  }
+  if (patch.notificationMinutesBefore !== undefined) {
+    request.notificationMinutesBefore = routine.notificationMinutesBefore;
+  }
+  if (patch.favorite !== undefined) {
+    request.favorite = routine.favorite;
+  }
+  if (patch.active !== undefined) {
+    request.active = routine.active;
+  }
+
+  return request;
 }
 
 function stableStringify(input: unknown): string {

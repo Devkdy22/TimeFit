@@ -13,9 +13,12 @@ import { HomeHero } from '../components/HomeHero';
 import { DepartureCalculatorCard } from '../components/DepartureCalculatorCard';
 import { LoginBenefitCard } from '../components/LoginBenefitCard';
 import { GuestNoticeCard } from '../components/GuestNoticeCard';
+import { RoutineSection } from '../components/RoutineSection';
 import { colors, layout, spacing } from '../constants/homeTheme';
 import { selectTimeyContextFromHome } from '../../../domain/timey/timeySelectors';
 import { resolveTimeyStateMachine } from '../../../domain/timey/timeyStateMachine';
+import type { Routine as HomeRoutine } from '../types/home.types';
+import type { Routine } from '../../routine/model/types';
 
 function toClockText(date: Date) {
   const hour = String(date.getHours()).padStart(2, '0');
@@ -30,10 +33,10 @@ function toCoordinateText(latitude: number, longitude: number) {
 export function HomeContainer() {
   const nav = useNavigationHelper();
   const insets = useSafeAreaInsets();
-  const { isLoggedIn } = useAuth();
+  const { isLoggedIn, profile } = useAuth();
   const { routines } = useRoutines();
   const { resolveOnce } = useCurrentLocation();
-  const { origin, arrivalAt, destination, setArrivalAt, applyPlaceToField, clearPlaceField } = useCommutePlan();
+  const { origin, arrivalAt, destination, setArrivalAt, applyPlaceToField, clearPlaceField, setSelectedRoute } = useCommutePlan();
 
   const [pickerVisible, setPickerVisible] = useState(false);
   const [resolvingCurrentLocation, setResolvingCurrentLocation] = useState(false);
@@ -42,7 +45,9 @@ export function HomeContainer() {
   const selectedDestinationName = destination?.name;
 
   const isGuest = !isLoggedIn;
-  const hasSavedRoutine = routines.length > 0;
+  const activeRoutines = useMemo(() => routines.filter((routine) => routine.active), [routines]);
+  const routinePreview = useMemo(() => activeRoutines.slice(0, 3).map(toHomeRoutine), [activeRoutines]);
+  const hasSavedRoutine = activeRoutines.length > 0;
   const isSearching = !origin || !destination;
   const hasRouteSelected = Boolean(origin && destination && arrivalAt);
   const homeTimeyState = resolveTimeyStateMachine(
@@ -128,6 +133,32 @@ export function HomeContainer() {
     nav.goToRecommendation();
   };
 
+  const applyRoutine = (routine: HomeRoutine) => {
+    const source = activeRoutines.find((item) => item.id === routine.id);
+    if (!source) {
+      return;
+    }
+    applyPlaceToField('origin', {
+      id: `routine-origin-${source.id}`,
+      name: source.originName,
+      address: source.originName,
+      latitude: source.originLat,
+      longitude: source.originLng,
+      iconType: 'location',
+    });
+    applyPlaceToField('destination', {
+      id: `routine-destination-${source.id}`,
+      name: source.destinationName,
+      address: source.destinationName,
+      latitude: source.destinationLat,
+      longitude: source.destinationLng,
+      iconType: 'location',
+    });
+    setArrivalAt(source.targetTime);
+    setSelectedRoute(null);
+    nav.goToRecommendation();
+  };
+
   const contentBottom = useMemo(() => layout.tabBarHeight + insets.bottom + 36, [insets.bottom]);
 
   return (
@@ -136,7 +167,7 @@ export function HomeContainer() {
         <LinearGradient colors={[colors.backgroundTop, colors.background]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
 
         <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottom }]} showsVerticalScrollIndicator={false}>
-          <HomeHero userName={isGuest ? undefined : '홍길동'} timeyState={homeTimeyState} />
+          <HomeHero userName={isGuest ? undefined : profile?.name ?? undefined} timeyState={homeTimeyState} />
 
           <DepartureCalculatorCard
             arrivalTime={selectedArrivalTime}
@@ -158,12 +189,65 @@ export function HomeContainer() {
               <GuestNoticeCard />
             </>
           ) : null}
+
+          {!isGuest ? (
+            <RoutineSection
+              routines={routinePreview}
+              onPressAll={nav.goToRoutines}
+              onPressRoutine={applyRoutine}
+              onPressAddRoutine={nav.goToRoutines}
+              onPressSearchOnly={nav.goToSearch}
+            />
+          ) : null}
         </ScrollView>
 
         <HomeTabBar status="relaxed" />
       </View>
     </SafeAreaView>
   );
+}
+
+function toHomeRoutine(routine: Routine): HomeRoutine {
+  return {
+    id: routine.id,
+    name: routine.name,
+    originName: routine.originName,
+    destinationName: routine.destinationName,
+    departureTime: estimateDepartureTime(routine.targetTime),
+    arrivalTime: routine.targetTime,
+    daysLabel: toDaysLabel(routine.repeatDays),
+    transitSummary: '저장된 루틴',
+    bufferMinutes: 10,
+  };
+}
+
+function estimateDepartureTime(arrivalTime: string) {
+  const [hourRaw, minuteRaw] = arrivalTime.split(':');
+  const hour = Number(hourRaw);
+  const minute = Number(minuteRaw);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+    return arrivalTime;
+  }
+  const date = new Date();
+  date.setHours(hour, minute, 0, 0);
+  date.setMinutes(date.getMinutes() - 45);
+  return toClockText(date);
+}
+
+function toDaysLabel(days: Routine['repeatDays']) {
+  if (days.length === 0) {
+    return '요일 미설정';
+  }
+  const labels: Record<Routine['repeatDays'][number], string> = {
+    sun: '일',
+    mon: '월',
+    tue: '화',
+    wed: '수',
+    thu: '목',
+    fri: '금',
+    sat: '토',
+  };
+  return days.map((day) => labels[day]).join('·');
 }
 
 const styles = StyleSheet.create({

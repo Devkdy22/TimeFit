@@ -1,5 +1,7 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { SelectedRouteSummary } from '../route-recommend/model/selectedRoute';
+import { useAuth } from '../auth/context';
+import { useRoutines } from '../routine/context';
 
 export type LocationField = 'origin' | 'destination';
 export type PlaceIconType = 'home' | 'office' | 'cafe' | 'gym' | 'school' | 'location';
@@ -29,33 +31,6 @@ interface CommutePlanContextValue {
   setSelectedRoute: (route: SelectedRouteSummary | null) => void;
 }
 
-const initialRecentPlaces: SavedPlace[] = [
-  {
-    id: 'recent-gangnam',
-    name: '강남역',
-    address: '서울 강남구 강남대로 396',
-    latitude: 37.4979,
-    longitude: 127.0276,
-    iconType: 'location',
-  },
-  {
-    id: 'recent-seoul-station',
-    name: '서울역 KTX',
-    address: '서울 용산구 한강대로 405',
-    latitude: 37.5547,
-    longitude: 126.9706,
-    iconType: 'location',
-  },
-  {
-    id: 'recent-cityhall',
-    name: '시청역 4번 출구',
-    address: '서울 중구 세종대로 110',
-    latitude: 37.5665,
-    longitude: 126.978,
-    iconType: 'location',
-  },
-];
-
 export function inferPlaceIconType(name: string): PlaceIconType {
   const normalized = name.toLowerCase().trim();
   if (normalized.includes('집') || normalized.includes('home')) {
@@ -79,30 +54,40 @@ export function inferPlaceIconType(name: string): PlaceIconType {
 const CommutePlanContext = createContext<CommutePlanContextValue | null>(null);
 
 export function CommutePlanProvider({ children }: { children: ReactNode }) {
+  const { isLoggedIn } = useAuth();
+  const { savedPlaces: remoteSavedPlaces } = useRoutines();
   const [origin, setOrigin] = useState<SavedPlace | null>(null);
   const [destination, setDestination] = useState<SavedPlace | null>(null);
-  const [savedPlaces, setSavedPlaces] = useState<SavedPlace[]>([
-    {
-      id: 'saved-home',
-      name: '집',
-      address: '서울 송파구 올림픽로 300',
-      latitude: 37.5133,
-      longitude: 127.1001,
-      iconType: 'home',
-    },
-    {
-      id: 'saved-office',
-      name: '회사',
-      address: '서울 강남구 테헤란로 212',
-      latitude: 37.5013,
-      longitude: 127.0396,
-      iconType: 'office',
-    },
-  ]);
-  const [recentPlaces, setRecentPlaces] = useState<SavedPlace[]>(initialRecentPlaces);
+  const [localSavedPlaces, setLocalSavedPlaces] = useState<SavedPlace[]>([]);
+  const [recentPlaces, setRecentPlaces] = useState<SavedPlace[]>([]);
   const [latestSelectedPlace, setLatestSelectedPlace] = useState<SavedPlace | null>(null);
   const [arrivalAt, setArrivalAt] = useState<string | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<SelectedRouteSummary | null>(null);
+
+  useEffect(() => {
+    if (isLoggedIn) {
+      return;
+    }
+    setOrigin(null);
+    setDestination(null);
+    setRecentPlaces([]);
+    setLatestSelectedPlace(null);
+    setArrivalAt(null);
+    setSelectedRoute(null);
+  }, [isLoggedIn]);
+  const savedPlaces = useMemo<SavedPlace[]>(() => {
+    if (isLoggedIn) {
+      return remoteSavedPlaces.map((place) => ({
+        id: place.id,
+        name: place.label,
+        address: place.address,
+        latitude: place.latitude,
+        longitude: place.longitude,
+        iconType: inferPlaceIconType(place.label),
+      }));
+    }
+    return localSavedPlaces;
+  }, [isLoggedIn, localSavedPlaces, remoteSavedPlaces]);
 
   const value = useMemo<CommutePlanContextValue>(
     () => ({
@@ -149,7 +134,7 @@ export function CommutePlanProvider({ children }: { children: ReactNode }) {
           iconType: inferPlaceIconType(trimmedName),
         };
 
-        setSavedPlaces((prev) => [saved, ...prev.filter((item) => item.address !== saved.address)]);
+        setLocalSavedPlaces((prev) => [saved, ...prev.filter((item) => item.address !== saved.address)]);
         return saved;
       },
     }),

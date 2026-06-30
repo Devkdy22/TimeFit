@@ -5,6 +5,7 @@ import { useAuth } from '../../auth/context';
 import type { ArrivalSummary } from '../model/types';
 import { appColors, appTypography } from '../../../theme/app-tokens';
 import { useNavigationHelper } from '../../../utils/navigation';
+import { TIMEY_FEATURES } from '../../../config/features';
 
 const mockArrivalSummary: ArrivalSummary = {
   originName: '집',
@@ -20,12 +21,16 @@ const mockArrivalSummary: ArrivalSummary = {
 export function ArrivalScreen() {
   const nav = useNavigationHelper();
   const { isLoggedIn, setPendingRoutineSeed } = useAuth();
+  const arrivalSummary = TIMEY_FEATURES.enableDemoMocks ? mockArrivalSummary : null;
 
   const onPressSaveRoutine = () => {
+    if (!arrivalSummary) {
+      return;
+    }
     setPendingRoutineSeed({
-      originName: mockArrivalSummary.originName,
-      destinationName: mockArrivalSummary.destinationName,
-      targetTime: mockArrivalSummary.arrivalTime,
+      originName: arrivalSummary.originName,
+      destinationName: arrivalSummary.destinationName,
+      targetTime: arrivalSummary.arrivalTime,
     });
 
     if (isLoggedIn) {
@@ -49,38 +54,47 @@ export function ArrivalScreen() {
         <TimeyMascot size={92} expression="smile" />
       </View>
 
-      <InfoCard>
-        <View style={styles.summaryHeaderRow}>
-          <Text style={styles.cardTitle}>이동 요약</Text>
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{mockArrivalSummary.statusLabel}</Text>
+      {arrivalSummary ? (
+        <InfoCard>
+          <View style={styles.summaryHeaderRow}>
+            <Text style={styles.cardTitle}>이동 요약</Text>
+            <View style={styles.badge}>
+              <Text style={styles.badgeText}>{arrivalSummary.statusLabel}</Text>
+            </View>
           </View>
-        </View>
 
-        <View style={styles.summaryGrid}>
-          <View style={styles.summaryRow}>
-            <Text style={styles.key}>출발 시간</Text>
-            <Text style={styles.value}>{mockArrivalSummary.departureTime}</Text>
+          <View style={styles.summaryGrid}>
+            <View style={styles.summaryRow}>
+              <Text style={styles.key}>출발 시간</Text>
+              <Text style={styles.value}>{arrivalSummary.departureTime}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.key}>도착 시간</Text>
+              <Text style={styles.value}>{arrivalSummary.arrivalTime}</Text>
+            </View>
+            <View style={styles.summaryRow}>
+              <Text style={styles.key}>총 소요 시간</Text>
+              <Text style={styles.value}>{arrivalSummary.durationText}</Text>
+            </View>
           </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.key}>도착 시간</Text>
-            <Text style={styles.value}>{mockArrivalSummary.arrivalTime}</Text>
-          </View>
-          <View style={styles.summaryRow}>
-            <Text style={styles.key}>총 소요 시간</Text>
-            <Text style={styles.value}>{mockArrivalSummary.durationText}</Text>
-          </View>
-        </View>
 
-        <Text style={styles.route}>{mockArrivalSummary.originName} {'->'} {mockArrivalSummary.destinationName}</Text>
-        <View style={styles.routeLine}>
-          <View style={styles.routeProgress} />
-        </View>
-      </InfoCard>
+          <Text style={styles.route}>{arrivalSummary.originName} {'->'} {arrivalSummary.destinationName}</Text>
+          <View style={styles.routeLine}>
+            <View style={styles.routeProgress} />
+          </View>
+        </InfoCard>
+      ) : (
+        <InfoCard>
+          <Text style={styles.cardTitle}>이동 요약 없음</Text>
+          <Text style={styles.emptySummaryText}>완료된 실제 이동 기록이 있을 때 요약이 표시됩니다.</Text>
+        </InfoCard>
+      )}
 
       <View style={styles.actions}>
         <PrimaryButton label="다음 이동 계획하기" onPress={nav.goToSearch} />
-        <SecondaryButton label="이 경로를 루틴으로 저장" onPress={onPressSaveRoutine} />
+        {arrivalSummary ? (
+          <SecondaryButton label="이 경로를 루틴으로 저장" onPress={onPressSaveRoutine} />
+        ) : null}
       </View>
     </AppScreen>
   );
@@ -152,6 +166,11 @@ const styles = StyleSheet.create({
   route: {
     marginTop: 14,
     color: appColors.textPrimary,
+    ...appTypography.body,
+  },
+  emptySummaryText: {
+    marginTop: 8,
+    color: appColors.textSecondary,
     ...appTypography.body,
   },
   routeLine: {

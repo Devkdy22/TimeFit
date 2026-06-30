@@ -15,5 +15,6 @@ export type Routine = {
   notificationEnabled: boolean;
   notificationMinutesBefore: number;
   favorite: boolean;
+  active: boolean;
   lastUsedAt?: string;
 };

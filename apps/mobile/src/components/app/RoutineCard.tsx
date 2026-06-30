@@ -44,7 +44,9 @@ export function RoutineCard({ routine, onPress, onPressFavorite, onPressMore }: 
         </View>
 
         <View style={styles.rowBottom}>
-          <Text style={styles.meta}>{routine.repeatDays.map((d) => dayLabelMap[d]).join('·')}</Text>
+          <Text style={styles.meta}>
+            {routine.active ? routine.repeatDays.map((d) => dayLabelMap[d]).join('·') : '비활성 · 요일 설정 필요'}
+          </Text>
           <View style={styles.notifyRow}>
             <Ionicons name={routine.notificationEnabled ? 'notifications' : 'notifications-off'} size={14} color={appColors.textSecondary} />
             <Text style={styles.meta}>{routine.notificationEnabled ? `${routine.notificationMinutesBefore}분 전` : '알림 끔'}</Text>

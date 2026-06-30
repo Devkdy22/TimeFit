@@ -61,6 +61,7 @@ export function RoutineScreen() {
   const [editRepeatDays, setEditRepeatDays] = useState<RoutineDay[]>([]);
   const [editNotificationEnabled, setEditNotificationEnabled] = useState(true);
   const [editFavorite, setEditFavorite] = useState(false);
+  const [editActive, setEditActive] = useState(true);
   const heartPop = useRef(new Animated.Value(0)).current;
   const valid = useMemo(
     () =>
@@ -103,6 +104,10 @@ export function RoutineScreen() {
     <RoutineCard
       routine={item}
       onPress={() => {
+        if (!item.active) {
+          Alert.alert('비활성 루틴', '요일을 선택하고 활성화한 뒤 사용할 수 있습니다.');
+          return;
+        }
         applyPlaceToField('origin', {
           id: `routine-origin-${item.id}`,
           name: item.originName,
@@ -133,6 +138,7 @@ export function RoutineScreen() {
         setEditRepeatDays(item.repeatDays);
         setEditNotificationEnabled(item.notificationEnabled);
         setEditFavorite(item.favorite);
+        setEditActive(item.active);
         setEditVisible(true);
       }}
     />
@@ -224,28 +230,38 @@ export function RoutineScreen() {
       return;
     }
     void (async () => {
+      const nextRepeatDays = editRepeatDays.length ? editRepeatDays : selectedRoutine.repeatDays;
+      if (editActive && nextRepeatDays.length === 0) {
+        Alert.alert('요일 선택 필요', '활성화하려면 반복 요일을 하나 이상 선택해 주세요.');
+        return;
+      }
       const originCoords = await resolveCoordinatesByName(editOrigin);
       const destinationCoords = await resolveCoordinatesByName(editDestination);
       if (!originCoords || !destinationCoords) {
         Alert.alert('위치 확인', '출발지/도착지 위치를 찾지 못했습니다. 장소명을 더 정확히 입력해 주세요.');
         return;
       }
-    updateRoutine(selectedRoutine.id, {
-      name: editName.trim(),
-      originName: normalizeDisplayName(editOrigin),
-      destinationName: normalizeDisplayName(editDestination),
-      originLat: originCoords.latitude,
-      originLng: originCoords.longitude,
-      destinationLat: destinationCoords.latitude,
-      destinationLng: destinationCoords.longitude,
-      targetTime: editTargetTime.trim(),
-      repeatDays: editRepeatDays.length ? editRepeatDays : selectedRoutine.repeatDays,
-      notificationEnabled: editNotificationEnabled,
-      favorite: editFavorite,
-    });
-    setEditVisible(false);
-    setSelectedRoutine(null);
-    Alert.alert('수정 완료', '루틴 정보가 업데이트되었습니다.');
+      try {
+        await updateRoutine(selectedRoutine.id, {
+          name: editName.trim(),
+          originName: normalizeDisplayName(editOrigin),
+          destinationName: normalizeDisplayName(editDestination),
+          originLat: originCoords.latitude,
+          originLng: originCoords.longitude,
+          destinationLat: destinationCoords.latitude,
+          destinationLng: destinationCoords.longitude,
+          targetTime: editTargetTime.trim(),
+          repeatDays: nextRepeatDays,
+          notificationEnabled: editNotificationEnabled,
+          favorite: editFavorite,
+          active: editActive,
+        });
+        setEditVisible(false);
+        setSelectedRoutine(null);
+        Alert.alert('수정 완료', '루틴 정보가 업데이트되었습니다.');
+      } catch {
+        Alert.alert('수정 실패', '루틴 수정 중 문제가 발생했습니다. 다시 시도해 주세요.');
+      }
     })();
   };
 
@@ -331,9 +347,15 @@ export function RoutineScreen() {
         text: '삭제',
         style: 'destructive',
         onPress: () => {
-          removeRoutine(target.id);
-          setEditVisible(false);
-          setSelectedRoutine(null);
+          void (async () => {
+            try {
+              await removeRoutine(target.id);
+              setEditVisible(false);
+              setSelectedRoutine(null);
+            } catch {
+              Alert.alert('삭제 실패', '루틴 삭제 중 문제가 발생했습니다. 다시 시도해 주세요.');
+            }
+          })();
         },
       },
     ]);
@@ -523,6 +545,10 @@ export function RoutineScreen() {
             <View style={styles.toggleRow}>
               <Text style={styles.toggleLabel}>알림 사용</Text>
               <Switch value={editNotificationEnabled} onValueChange={setEditNotificationEnabled} />
+            </View>
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>활성화</Text>
+              <Switch value={editActive} onValueChange={setEditActive} />
             </View>
 
             <View style={styles.editActionRow}>

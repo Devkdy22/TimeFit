@@ -2,10 +2,15 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { BottomCTA, ScreenContainer, SectionHeader, StatusBadge } from '../../../components/ui';
 import { theme } from '../../../theme/theme';
 import type { UiStatus } from '../../../theme/status-config';
-import type { RoutineItem } from '../../../mocks/route/types';
+
+interface RoutineChecklistItem {
+  id: string;
+  title: string;
+  hint: string;
+}
 
 export interface RoutineViewProps {
-  routineItems: RoutineItem[];
+  routineItems: RoutineChecklistItem[];
   checkedIds: string[];
   completedCount: number;
   allCompleted: boolean;

@@ -1,13 +1,14 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   abortPendingAuthRefresh,
+  buildOAuthStartUrl,
   configureAuthSessionBridge,
   getMyAuthProfile,
-  loginWithSocialProvider,
   logoutAuthSession,
+  redeemOAuthLoginTicket,
   refreshAuthSession,
   type AuthProfile,
   type SocialProvider as ApiSocialProvider,
@@ -38,22 +39,6 @@ interface AuthContextValue {
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-function makeOAuthState(provider: SocialProvider) {
-  return `${provider}-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
-}
-
-function getGoogleClientId() {
-  return process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID ?? '';
-}
-
-function getKakaoClientId() {
-  return process.env.EXPO_PUBLIC_KAKAO_REST_API_KEY ?? '';
-}
-
-function getNaverClientId() {
-  return process.env.EXPO_PUBLIC_NAVER_CLIENT_ID ?? '';
-}
 
 type AuthSessionModule = {
   makeRedirectUri: (options?: {
@@ -120,6 +105,7 @@ function buildAuthResultLog(result: Record<string, unknown>) {
     type: typeof result.type === 'string' ? result.type : 'unknown',
     hasUrl: Boolean(urlValue),
     hasCode: Boolean(callback.code),
+    hasTicket: Boolean(callback.ticket),
     hasState: Boolean(callback.state),
     errorCode:
       typeof result.errorCode === 'string'
@@ -144,17 +130,6 @@ function toAuthResultError(provider: SocialProvider, resultType: string, reason?
     return new Error(`${labels[provider]} 로그인 실패(${resultType}): ${reason}`);
   }
   return new Error(`${labels[provider]} 로그인 실패(${resultType})`);
-}
-
-function validateStateMatch(
-  provider: SocialProvider,
-  expectedState: string,
-  actualState: string | undefined,
-) {
-  if (actualState && actualState === expectedState) {
-    return;
-  }
-  throw toAuthResultError(provider, 'state_mismatch', 'state 검증에 실패했습니다.');
 }
 
 function classifyAuthResultFailure(
@@ -205,12 +180,43 @@ function readCallbackParams(callbackUrl: string) {
     const params = new URLSearchParams(parsed.search);
     return {
       code: params.get('code') ?? undefined,
+      error: params.get('error') ?? undefined,
       state: params.get('state') ?? undefined,
+      ticket: params.get('ticket') ?? undefined,
       idToken: params.get('id_token') ?? undefined,
     };
   } catch {
     return {};
   }
+}
+
+function readCallbackProvider(callbackUrl: string): SocialProvider | undefined {
+  try {
+    const parsed = new URL(callbackUrl);
+    const provider = parsed.searchParams.get('provider');
+    if (provider === 'google' || provider === 'kakao' || provider === 'naver') {
+      return provider;
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
+function logOAuthCallback(event: string, url: string | null) {
+  if (!url?.startsWith('timefit://auth')) {
+    return;
+  }
+  const params = readCallbackParams(url);
+  console.info('[Auth][OAuth]', {
+    event,
+    provider: readCallbackProvider(url),
+    hasCode: Boolean(params.code),
+    hasTicket: Boolean(params.ticket),
+    hasState: Boolean(params.state),
+    redirectUri: 'timefit://auth',
+    runtime: getRuntimeDescriptor(),
+  });
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -260,6 +266,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       logoutInFlightRef.current = false;
     }
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+    void Linking.getInitialURL().then((url) => {
+      if (isMounted) {
+        logOAuthCallback('oauth_deep_link_initial_url', url);
+      }
+    });
+
+    const subscription = Linking.addEventListener('url', ({ url }) => {
+      logOAuthCallback('oauth_deep_link_url_event', url);
+    });
+
+    return () => {
+      isMounted = false;
+      subscription.remove();
+    };
   }, []);
 
   useEffect(() => {
@@ -408,146 +432,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             redirectRuntime: redirectResolution.runtime,
             runtime: getRuntimeDescriptor(),
           });
-          let authTokens;
-          if (provider === 'google') {
-            const clientId = getGoogleClientId();
-            if (!clientId) {
-              throw new Error('EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID is missing.');
-            }
-            const state = makeOAuthState('google');
-            const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({
-              client_id: clientId,
-              redirect_uri: redirectUri,
-              response_type: 'code',
-              scope: 'openid profile email',
-              access_type: 'offline',
-              state,
-            }).toString()}`;
-
-            console.info('[Auth][OAuth]', {
-              event: 'oauth_open_auth_session',
-              provider,
-              redirectUri,
-              authUrl: summarizeAuthUrl(authUrl),
-            });
-            const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
-            const resultLog = buildAuthResultLog(result as Record<string, unknown>);
-            console.info('[Auth][OAuth]', {
-              event: 'oauth_auth_session_result',
-              provider,
-              redirectUri,
-              authUrl: summarizeAuthUrl(authUrl),
-              ...resultLog,
-            });
-            if (result.type !== 'success') {
-              throw classifyAuthResultFailure(provider, result as Record<string, unknown>);
-            }
-            if (!result.url) {
-              throw toAuthResultError(provider, 'success_missing_url', '콜백 URL이 없습니다.');
-            }
-            const { code: authorizationCode } = readCallbackParams(result.url);
-            if (!authorizationCode) {
-              throw toAuthResultError(provider, 'success_missing_code', 'authorization code가 없습니다.');
-            }
-            validateStateMatch(provider, state, readCallbackParams(result.url).state);
-            authTokens = await loginWithSocialProvider({
-              provider: 'google',
-              authorizationCode,
-              redirectUri,
-              state,
-            });
-          } else if (provider === 'kakao') {
-            const clientId = getKakaoClientId();
-            if (!clientId) {
-              throw new Error('EXPO_PUBLIC_KAKAO_REST_API_KEY is missing.');
-            }
-            const state = makeOAuthState('kakao');
-            const authUrl = `https://kauth.kakao.com/oauth/authorize?${new URLSearchParams({
-              client_id: clientId,
-              redirect_uri: redirectUri,
-              response_type: 'code',
-              state,
-            }).toString()}`;
-
-            console.info('[Auth][OAuth]', {
-              event: 'oauth_open_auth_session',
-              provider,
-              redirectUri,
-              authUrl: summarizeAuthUrl(authUrl),
-            });
-            const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
-            const resultLog = buildAuthResultLog(result as Record<string, unknown>);
-            console.info('[Auth][OAuth]', {
-              event: 'oauth_auth_session_result',
-              provider,
-              redirectUri,
-              authUrl: summarizeAuthUrl(authUrl),
-              ...resultLog,
-            });
-            if (result.type !== 'success') {
-              throw classifyAuthResultFailure(provider, result as Record<string, unknown>);
-            }
-            if (!result.url) {
-              throw toAuthResultError(provider, 'success_missing_url', '콜백 URL이 없습니다.');
-            }
-            const { code: authorizationCode } = readCallbackParams(result.url);
-            if (!authorizationCode) {
-              throw toAuthResultError(provider, 'success_missing_code', 'authorization code가 없습니다.');
-            }
-            validateStateMatch(provider, state, readCallbackParams(result.url).state);
-            authTokens = await loginWithSocialProvider({
-              provider: 'kakao',
-              authorizationCode,
-              redirectUri,
-            });
-          } else {
-            const clientId = getNaverClientId();
-            if (!clientId) {
-              throw new Error('EXPO_PUBLIC_NAVER_CLIENT_ID is missing.');
-            }
-            const state = makeOAuthState('naver');
-            const authUrl = `https://nid.naver.com/oauth2.0/authorize?${new URLSearchParams({
-              response_type: 'code',
-              client_id: clientId,
-              redirect_uri: redirectUri,
-              state,
-            }).toString()}`;
-
-            console.info('[Auth][OAuth]', {
-              event: 'oauth_open_auth_session',
-              provider,
-              redirectUri,
-              authUrl: summarizeAuthUrl(authUrl),
-            });
-            const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
-            const resultLog = buildAuthResultLog(result as Record<string, unknown>);
-            console.info('[Auth][OAuth]', {
-              event: 'oauth_auth_session_result',
-              provider,
-              redirectUri,
-              authUrl: summarizeAuthUrl(authUrl),
-              ...resultLog,
-            });
-            if (result.type !== 'success') {
-              throw classifyAuthResultFailure(provider, result as Record<string, unknown>);
-            }
-            if (!result.url) {
-              throw toAuthResultError(provider, 'success_missing_url', '콜백 URL이 없습니다.');
-            }
-            const { code: authorizationCode, state: responseState } = readCallbackParams(
-              result.url,
-            );
-            if (!authorizationCode) {
-              throw toAuthResultError(provider, 'success_missing_code', 'authorization code가 없습니다.');
-            }
-            validateStateMatch(provider, state, responseState);
-            authTokens = await loginWithSocialProvider({
-              provider: 'naver',
-              authorizationCode,
-              redirectUri,
-              state,
-            });
+          const authUrl = buildOAuthStartUrl(provider, redirectUri);
+          console.info('[Auth][OAuth]', {
+            event: 'oauth_open_auth_session',
+            provider,
+            redirectUri,
+            authUrl: summarizeAuthUrl(authUrl),
+          });
+          const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
+          const resultLog = buildAuthResultLog(result as Record<string, unknown>);
+          console.info('[Auth][OAuth]', {
+            event: 'oauth_auth_session_result',
+            provider,
+            redirectUri,
+            authUrl: summarizeAuthUrl(authUrl),
+            ...resultLog,
+          });
+          if (result.type !== 'success') {
+            throw classifyAuthResultFailure(provider, result as Record<string, unknown>);
           }
+          if (!result.url) {
+            throw toAuthResultError(provider, 'success_missing_url', '콜백 URL이 없습니다.');
+          }
+          const { error, ticket } = readCallbackParams(result.url);
+          if (error) {
+            throw toAuthResultError(provider, 'provider_error', error);
+          }
+          if (!ticket) {
+            throw toAuthResultError(provider, 'success_missing_ticket', '로그인 티켓이 없습니다.');
+          }
+          const authTokens = await redeemOAuthLoginTicket(ticket);
 
           logoutInFlightRef.current = false;
           sessionGenerationRef.current += 1;

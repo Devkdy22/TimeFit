@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { resolveStatusFromApi } from '../../../theme/status-config';
-import { routineItems } from '../../../mocks/route';
 import { useCommutePlan } from '../../commute-state/context';
+import { useRoutines } from '../../routine/context';
 
 function parseClockToFutureMinutes(value: string | null) {
   if (!value) {
@@ -26,6 +26,7 @@ function parseClockToFutureMinutes(value: string | null) {
 
 export function useHomeState() {
   const { origin, destination, arrivalAt, recentPlaces, savedPlaces, setArrivalAt } = useCommutePlan();
+  const { routines } = useRoutines();
 
   const minutesUntilArrival = useMemo(() => parseClockToFutureMinutes(arrivalAt), [arrivalAt]);
   const apiStatus = minutesUntilArrival <= 30 ? '긴급' : minutesUntilArrival <= 50 ? '주의' : '여유';
@@ -52,7 +53,7 @@ export function useHomeState() {
     hasDestination,
     savedPlaces,
     recentPlaces,
-    routinePreview: routineItems.slice(0, 2),
+    routinePreview: routines.filter((routine) => routine.active).slice(0, 2),
     setArrivalAt,
   };
 }

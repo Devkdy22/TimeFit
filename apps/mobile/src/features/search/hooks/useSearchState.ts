@@ -21,41 +21,6 @@ const DEFAULT_MAP_CENTER: MapCenterState = {
   source: 'init',
 };
 
-const fallbackSearchPlaces: SavedPlace[] = [
-  {
-    id: 'fallback-gangnam',
-    name: '강남역 2번 출구',
-    address: '서울 강남구 강남대로 396',
-    latitude: 37.4979,
-    longitude: 127.0276,
-    iconType: 'location',
-  },
-  {
-    id: 'fallback-jamsil',
-    name: '잠실역',
-    address: '서울 송파구 올림픽로 265',
-    latitude: 37.5133,
-    longitude: 127.1002,
-    iconType: 'location',
-  },
-  {
-    id: 'fallback-anguk',
-    name: '안국역 2번 출구',
-    address: '서울 종로구 율곡로 62',
-    latitude: 37.5766,
-    longitude: 126.9855,
-    iconType: 'location',
-  },
-  {
-    id: 'fallback-jongno',
-    name: '종로3가역 5번 출구',
-    address: '서울 종로구 종로 130',
-    latitude: 37.5702,
-    longitude: 126.9911,
-    iconType: 'location',
-  },
-];
-
 function withNamedId(place: SavedPlace) {
   return {
     ...place,
@@ -173,7 +138,7 @@ export function useSearchState() {
   const [isDestinationFocused, setIsDestinationFocused] = useState(false);
   const [mapQuery, setMapQuery] = useState('');
 
-  const [mapSearchResults, setMapSearchResults] = useState<SavedPlace[]>(fallbackSearchPlaces.slice(0, 4));
+  const [mapSearchResults, setMapSearchResults] = useState<SavedPlace[]>([]);
   const [fieldSuggestions, setFieldSuggestions] = useState<SavedPlace[]>([]);
   const [isSearchingMap, setIsSearchingMap] = useState(false);
   const [isSearchingFieldSuggestions, setIsSearchingFieldSuggestions] = useState(false);
@@ -218,7 +183,6 @@ export function useSearchState() {
     const merged = [
       ...recentPlaces,
       ...savedPlaces,
-      ...fallbackSearchPlaces,
       ...(origin ? [origin] : []),
       ...(destination ? [destination] : []),
     ];

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { UiStatus } from '../../../theme/status-config';
-import { routineItems } from '../../../mocks/route';
+
+const routineItems: Array<{ id: string; title: string; hint: string }> = [];
 
 export function useRoutineState() {
   const [checkedIds, setCheckedIds] = useState<string[]>([]);

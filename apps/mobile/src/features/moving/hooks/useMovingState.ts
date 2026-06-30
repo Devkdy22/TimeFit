@@ -3,6 +3,7 @@ import * as Location from 'expo-location';
 import { useCommutePlan } from '../../commute-state/context';
 import { useTripTracking } from '../../../hooks/useTripTracking';
 import { movingMapMockData } from '../../../mocks/map';
+import { TIMEY_FEATURES } from '../../../config/features';
 import type { MapCoordinate, MapRouteSegment, MovingMapData } from '../../map/types';
 import type { UiStatus } from '../../../theme/status-config';
 import {
@@ -1317,7 +1318,7 @@ function toPathFromRouteSegments(segmentPolylines: MapRouteSegment[]) {
 
   const geometry = normalizePathPoints(rawPoints);
   if (geometry.length < 2) {
-    return movingMapMockData.routePath.points;
+    return TIMEY_FEATURES.enableDemoMocks ? movingMapMockData.routePath.points : [];
   }
   return geometry;
 }
@@ -1434,12 +1435,17 @@ export function useMovingState() {
         });
         setResolvedRouteSegments(immediate);
       }
+      if (!nextOrigin || !nextDestination) {
+        setResolvedRouteSegments([]);
+        routeBuildInFlightRef.current = null;
+        return;
+      }
 
       const nextSegments = await buildResolvedRouteSegments(
         route as RawRoute,
         {
-          origin: nextOrigin ?? movingMapMockData.currentLocation,
-          destination: nextDestination ?? movingMapMockData.nextActionPoint.coordinate,
+          origin: nextOrigin,
+          destination: nextDestination,
         },
         (progressiveSegments) => {
           if (!cancelled) {
@@ -1480,15 +1486,21 @@ export function useMovingState() {
   const arrivalClock = arrivalDate.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
 
   const mapData: MovingMapData = useMemo(() => {
-    const fallback = movingMapMockData;
+    const fallback = TIMEY_FEATURES.enableDemoMocks ? movingMapMockData : null;
     const routeSegments = resolvedRouteSegments;
     const routePathPoints =
-      routeSegments.length > 0 ? toPathFromRouteSegments(routeSegments) : fallback.routePath.points;
+      routeSegments.length > 0
+        ? toPathFromRouteSegments(routeSegments)
+        : (fallback?.routePath.points ?? []);
     const currentPointIndex = Math.min(
       Math.max(0, Math.floor(progress * (routePathPoints.length - 1))),
       Math.max(0, routePathPoints.length - 1),
     );
-    const currentPoint = routePathPoints[currentPointIndex] ?? fallback.currentLocation;
+    const currentPoint =
+      routePathPoints[currentPointIndex] ??
+      (origin ? { lat: origin.latitude, lng: origin.longitude } : null) ??
+      (destination ? { lat: destination.latitude, lng: destination.longitude } : null) ??
+      fallback?.currentLocation ?? { lat: 0, lng: 0 };
     const liveCurrent = tracking.currentPosition
       ? { lat: tracking.currentPosition.lat, lng: tracking.currentPosition.lng }
       : null;
@@ -1499,13 +1511,16 @@ export function useMovingState() {
         lng: liveCurrent?.lng ?? currentPoint.lng,
       },
       routePath: {
-        id: tracking.route?.id ?? fallback.routePath.id,
+        id: tracking.route?.id ?? fallback?.routePath.id ?? 'empty-route',
         points: routePathPoints,
       },
       routeSegments,
       nextActionPoint: {
         id: 'next-action',
-        coordinate: routePathPoints[Math.min(routePathPoints.length - 1, Math.max(0, Math.floor(progress * routePathPoints.length)))] ?? fallback.nextActionPoint.coordinate,
+        coordinate:
+          routePathPoints[Math.min(routePathPoints.length - 1, Math.max(0, Math.floor(progress * routePathPoints.length)))] ??
+          fallback?.nextActionPoint.coordinate ??
+          currentPoint,
         title: '다음 행동',
         instruction: tracking.nextAction ?? '다음 교통수단을 확인하세요.',
         status,

@@ -83,10 +83,21 @@ export interface RoutineListItem {
   id: string;
   userId: string;
   title: string;
-  origin: string;
-  destination: string;
+  origin: {
+    name: string;
+    lat: number;
+    lng: number;
+  };
+  destination: {
+    name: string;
+    lat: number;
+    lng: number;
+  };
   weekdays: number[];
   arrivalTime: string;
+  notificationEnabled: boolean;
+  notificationMinutesBefore: number;
+  favorite: boolean;
   active: boolean;
   lastTriggeredAt?: string;
   createdAt: string;
@@ -107,6 +118,10 @@ export interface CreateRoutineRequest {
   };
   weekdays: number[];
   arrivalTime: string;
+  notificationEnabled?: boolean;
+  notificationMinutesBefore?: number;
+  favorite?: boolean;
+  active?: boolean;
   savedRoute?: {
     id: string;
     name: string;
@@ -120,6 +135,8 @@ export interface CreateRoutineRequest {
   };
   expoPushToken?: string;
 }
+
+export type UpdateRoutineRequest = Partial<CreateRoutineRequest>;
 
 export interface SavedPlaceItem {
   id: string;
@@ -1373,6 +1390,23 @@ export async function loginWithSocialProvider(input: {
   return readApiEnvelope<AuthTokens>(response);
 }
 
+export function buildOAuthStartUrl(provider: SocialProvider, returnTo: string): string {
+  return `${API_BASE_URL}/auth/${provider}/start?${new URLSearchParams({ returnTo }).toString()}`;
+}
+
+export async function redeemOAuthLoginTicket(ticket: string): Promise<AuthTokens> {
+  const response = await authorizedFetch(`${API_BASE_URL}/auth/session/redeem`, {
+    method: 'POST',
+    authMode: 'public',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ticket }),
+  });
+  if (!response.ok) {
+    throw new Error(`OAuth ticket redeem failed: ${response.status}`);
+  }
+  return readApiEnvelope<AuthTokens>(response);
+}
+
 export async function refreshAuthSession(
   refreshToken: string,
   signal?: AbortSignal | null,
@@ -1482,6 +1516,40 @@ export async function createRoutine(
   }
 
   return readApiEnvelope<RoutineListItem>(response);
+}
+
+export async function updateRoutine(
+  id: string,
+  input: UpdateRoutineRequest,
+  signal?: AbortSignal,
+): Promise<RoutineListItem> {
+  const response = await authorizedFetch(`${API_BASE_URL}/routines/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    authMode: 'protected',
+    signal,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+
+  if (!response.ok) {
+    throw new ApiRequestError(`Update routine failed: ${response.status}`, response.status);
+  }
+
+  return readApiEnvelope<RoutineListItem>(response);
+}
+
+export async function deleteRoutine(id: string, signal?: AbortSignal): Promise<void> {
+  const response = await authorizedFetch(`${API_BASE_URL}/routines/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+    authMode: 'protected',
+    signal,
+  });
+
+  if (!response.ok) {
+    throw new ApiRequestError(`Delete routine failed: ${response.status}`, response.status);
+  }
 }
 
 export async function getMyPlaces(signal?: AbortSignal): Promise<SavedPlaceItem[]> {
