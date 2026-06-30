@@ -55,10 +55,19 @@ export class SavedPlacesController {
     }
 
     const normalizedKey = this.validateIdempotencyKey(idempotencyKey);
-    const scopeKey = `${authUserId}:POST:/me/places:${normalizedKey}`;
-    const payload = body;
+    if (!normalizedKey) {
+      const created = await this.savedPlacesService.create(authUserId, body);
+      return ApiResponse.ok(created);
+    }
 
-    const existing = this.idempotencyStore.begin(scopeKey, payload);
+    const idempotencyInput = {
+      userId: authUserId,
+      scope: 'saved-place:create',
+      key: normalizedKey,
+      payload: body,
+    };
+
+    const existing = await this.idempotencyStore.begin(idempotencyInput);
     if (existing.replayed && existing.response) {
       this.metrics.increment('saved_place_idempotency_hit_total', {
         authUserId,
@@ -78,7 +87,7 @@ export class SavedPlacesController {
     try {
       const created = await this.savedPlacesService.create(authUserId, body);
       const response = ApiResponse.ok(created);
-      this.idempotencyStore.complete(scopeKey, payload, response);
+      await this.idempotencyStore.complete(idempotencyInput, response);
       this.metrics.increment('saved_place_create_total', {
         authUserId,
         placeId: created.id,
@@ -95,7 +104,7 @@ export class SavedPlacesController {
       );
       return response;
     } catch (error) {
-      this.idempotencyStore.clearPending(scopeKey);
+      await this.idempotencyStore.clearPending(idempotencyInput);
       this.metrics.increment('saved_place_create_failed_total', {
         authUserId,
         idempotencyKey: normalizedKey,
@@ -157,12 +166,9 @@ export class SavedPlacesController {
     }
   }
 
-  private validateIdempotencyKey(key: string | undefined): string {
+  private validateIdempotencyKey(key: string | undefined): string | null {
     if (!key?.trim()) {
-      throw new BadRequestException({
-        code: 'IDEMPOTENCY_KEY_REQUIRED',
-        message: 'Idempotency-Key header is required',
-      });
+      return null;
     }
 
     const normalized = key.trim();

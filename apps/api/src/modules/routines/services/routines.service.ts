@@ -1,9 +1,9 @@
-import { ForbiddenException, Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { SafeLogger } from '../../../common/logger/safe-logger.service';
 import { NotificationService } from '../../notifications/services/notification.service';
 import { RecommendationService } from '../../recommendation/services/recommendation.service';
 import { RoutinesRepository } from './routines.repository';
-import { CreateRoutineDto } from '../dto/create-routine.dto';
+import { CreateRoutineDto, UpdateRoutineDto } from '../dto/create-routine.dto';
 import type { RoutineEntity } from '../types/routine.types';
 import type { RecommendationResult, RecommendationResponse } from '../../recommendation/types/recommendation.types';
 
@@ -31,7 +31,7 @@ export class RoutinesService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  createRoutine(userId: string, input: CreateRoutineDto): RoutineEntity {
+  createRoutine(userId: string, input: CreateRoutineDto): Promise<RoutineEntity> {
     return this.routinesRepository.create({
       userId,
       title: input.title,
@@ -39,6 +39,10 @@ export class RoutinesService implements OnModuleInit, OnModuleDestroy {
       destination: input.destination,
       weekdays: input.weekdays,
       arrivalTime: input.arrivalTime,
+      notificationEnabled: input.notificationEnabled ?? true,
+      notificationMinutesBefore: input.notificationMinutesBefore ?? 10,
+      favorite: input.favorite ?? false,
+      active: input.active ?? true,
       savedRoute: input.savedRoute
         ? {
             ...input.savedRoute,
@@ -49,21 +53,43 @@ export class RoutinesService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  listRoutines(userId: string): RoutineEntity[] {
+  listRoutines(userId: string): Promise<RoutineEntity[]> {
     return this.routinesRepository.findByUser(userId);
   }
 
+  updateRoutine(userId: string, routineId: string, input: UpdateRoutineDto): Promise<RoutineEntity> {
+    return this.routinesRepository.updateOwned(userId, routineId, {
+      title: input.title,
+      origin: input.origin,
+      destination: input.destination,
+      weekdays: input.weekdays,
+      arrivalTime: input.arrivalTime,
+      notificationEnabled: input.notificationEnabled,
+      notificationMinutesBefore: input.notificationMinutesBefore,
+      favorite: input.favorite,
+      active: input.active,
+      savedRoute: input.savedRoute
+        ? {
+            ...input.savedRoute,
+            source: 'api',
+          }
+        : undefined,
+      expoPushToken: input.expoPushToken,
+    });
+  }
+
+  deleteRoutine(userId: string, routineId: string): Promise<void> {
+    return this.routinesRepository.deleteOwned(userId, routineId);
+  }
+
   async runRoutineNow(userId: string, routineId: string) {
-    const routine = this.routinesRepository.findById(routineId);
-    if (routine.userId !== userId) {
-      throw new ForbiddenException('You do not have access to this routine');
-    }
+    const routine = await this.routinesRepository.findOwned(userId, routineId);
     return this.executeRoutine(routine, new Date());
   }
 
   private async processAutomations() {
     const now = new Date();
-    const active = this.routinesRepository.findActive();
+    const active = await this.routinesRepository.findActive();
 
     for (const routine of active) {
       if (!this.isDueToday(routine, now)) {
@@ -98,7 +124,7 @@ export class RoutinesService implements OnModuleInit, OnModuleDestroy {
       },
     });
 
-    this.routinesRepository.markTriggered(routine.id, now.toISOString());
+    await this.routinesRepository.markTriggered(routine.id, now.toISOString());
 
     if (routine.expoPushToken && this.isRecommendationResult(recommendation)) {
       await this.notificationService.sendRoutineNotification({

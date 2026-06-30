@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException, Injectable, UnauthorizedException } from '@nestjs/common';
 import { createHash, randomBytes } from 'crypto';
 import { SafeLogger } from '../../common/logger/safe-logger.service';
 import { SocialLoginDto } from './dto/social-login.dto';
@@ -6,32 +6,155 @@ import { AppConfigService } from '../../common/config/app-config.service';
 
 type Provider = 'google' | 'kakao' | 'naver';
 
-interface Identity {
+type AuthUserRow = {
   id: string;
-  provider: Provider;
+  email: string;
+  name: string | null;
+};
+
+type AuthIdentityRow = {
+  id: string;
+  provider: string;
   providerUserId: string;
   email: string;
-  name?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface SessionRecord {
+  name: string | null;
   userId: string;
-  refreshHash: string;
-  accessToken: string;
-  accessExpiresAt: number;
-  refreshExpiresAt: number;
-  revokedAt?: number;
-}
+  user: AuthUserRow;
+};
+
+type AuthSessionRow = {
+  id: string;
+  userId: string;
+  accessTokenHash: string;
+  refreshTokenHash: string;
+  accessExpiresAt: Date;
+  refreshExpiresAt: Date;
+  revokedAt: Date | null;
+  user: AuthUserRow;
+};
+
+type OAuthStateRow = {
+  id: string;
+  provider: string;
+  stateHash: string;
+  returnTo: string;
+  expiresAt: Date;
+  consumedAt: Date | null;
+};
+
+type OAuthLoginTicketRow = {
+  id: string;
+  ticketHash: string;
+  userId: string;
+  sessionId: string | null;
+  expiresAt: Date;
+  consumedAt: Date | null;
+};
+
+type AuthDbClient = {
+  $transaction<T>(fn: (tx: AuthDbClient) => Promise<T>): Promise<T>;
+  user: {
+    findUnique(args: {
+      where: { email: string };
+    }): Promise<AuthUserRow | null>;
+    create(args: {
+      data: { email: string; name?: string };
+    }): Promise<AuthUserRow>;
+    update(args: {
+      where: { id: string };
+      data: { email: string; name?: string };
+    }): Promise<AuthUserRow>;
+  };
+  authIdentity: {
+    findUnique(args: {
+      where: { provider_providerUserId: { provider: string; providerUserId: string } };
+      include: { user: true };
+    }): Promise<AuthIdentityRow | null>;
+    create(args: {
+      data: {
+        userId: string;
+        provider: string;
+        providerUserId: string;
+        email: string;
+        name?: string;
+      };
+      include: { user: true };
+    }): Promise<AuthIdentityRow>;
+    update(args: {
+      where: { id: string };
+      data: { email: string; name?: string };
+      include: { user: true };
+    }): Promise<AuthIdentityRow>;
+  };
+  authSession: {
+    create(args: {
+      data: {
+        userId: string;
+        accessTokenHash: string;
+        refreshTokenHash: string;
+        accessExpiresAt: Date;
+        refreshExpiresAt: Date;
+      };
+    }): Promise<{ id: string }>;
+    findUnique(args: {
+      where: { refreshTokenHash?: string; accessTokenHash?: string };
+      include: { user: true };
+    }): Promise<AuthSessionRow | null>;
+    update(args: {
+      where: { id: string };
+      data: { revokedAt: Date };
+    }): Promise<{ id: string }>;
+    updateMany(args: {
+      where: {
+        refreshTokenHash: string;
+        revokedAt: null;
+        refreshExpiresAt: { gt: Date };
+      };
+      data: { revokedAt: Date };
+    }): Promise<{ count: number }>;
+  };
+  oAuthState: {
+    create(args: {
+      data: {
+        provider: string;
+        stateHash: string;
+        returnTo: string;
+        expiresAt: Date;
+      };
+    }): Promise<{ id: string }>;
+    findUnique(args: {
+      where: { stateHash: string };
+    }): Promise<OAuthStateRow | null>;
+    update(args: {
+      where: { id: string };
+      data: { consumedAt: Date };
+    }): Promise<{ id: string }>;
+  };
+  oAuthLoginTicket: {
+    create(args: {
+      data: {
+        ticketHash: string;
+        userId: string;
+        expiresAt: Date;
+      };
+    }): Promise<{ id: string }>;
+    findUnique(args: {
+      where: { ticketHash: string };
+    }): Promise<OAuthLoginTicketRow | null>;
+    update(args: {
+      where: { id: string };
+      data: { consumedAt: Date; sessionId?: string };
+    }): Promise<{ id: string }>;
+  };
+};
 
 @Injectable()
 export class AuthService {
-  private readonly identitiesByKey = new Map<string, Identity>();
-  private readonly sessionsByRefreshHash = new Map<string, SessionRecord>();
-  private readonly accessToRefreshHash = new Map<string, string>();
+  private prisma: AuthDbClient | null = null;
   private readonly accessTtlMs = 15 * 60 * 1000;
   private readonly refreshTtlMs = 30 * 24 * 60 * 60 * 1000;
+  private readonly oauthStateTtlMs = 10 * 60 * 1000;
+  private readonly loginTicketTtlMs = 3 * 60 * 1000;
 
   constructor(
     private readonly logger: SafeLogger,
@@ -40,85 +163,192 @@ export class AuthService {
 
   async socialLogin(input: SocialLoginDto) {
     const profile = await this.resolveSocialProfile(input);
-    const key = `${profile.provider}:${profile.providerUserId}`;
-    const nowIso = new Date().toISOString();
-    const found = this.identitiesByKey.get(key);
-    const identity: Identity = found
-      ? { ...found, email: profile.email, name: profile.name ?? found.name, updatedAt: nowIso }
-      : {
-          id: `user_${randomBytes(12).toString('hex')}`,
+    const userId = await this.findOrCreateIdentityUserId(profile);
+    return this.issueTokens(userId);
+  }
+
+  async startOAuth(provider: Provider, returnTo: string) {
+    this.assertSupportedProvider(provider);
+    this.assertAllowedReturnTo(returnTo);
+
+    const state = this.randomToken();
+    const redirectUri = this.providerCallbackUrl(provider);
+    const authorizeUrl = this.providerAuthorizeUrl(provider, redirectUri, state);
+    const prisma = await this.getPrismaClient();
+    await prisma.oAuthState.create({
+      data: {
+        provider,
+        stateHash: this.hashToken(state),
+        returnTo,
+        expiresAt: new Date(Date.now() + this.oauthStateTtlMs),
+      },
+    });
+
+    return authorizeUrl;
+  }
+
+  async completeOAuthCallback(provider: Provider, input: { code?: string; state?: string; error?: string }) {
+    this.assertSupportedProvider(provider);
+    if (input.error) {
+      return this.oauthFailureReturnTo('timefit://auth', provider, 'provider_error');
+    }
+    if (!input.code || !input.state) {
+      return this.oauthFailureReturnTo('timefit://auth', provider, 'missing_code_or_state');
+    }
+
+    let returnTo = 'timefit://auth';
+    try {
+      const state = await this.consumeOAuthState(provider, input.state);
+      returnTo = state.returnTo;
+      const profile = await this.resolveSocialProfile({
+        provider,
+        authorizationCode: input.code,
+        redirectUri: this.providerCallbackUrl(provider),
+        state: input.state,
+      });
+      const userId = await this.findOrCreateIdentityUserId(profile);
+      const ticket = await this.createLoginTicket(userId);
+      return this.withQuery(returnTo, { ticket, state: input.state, provider });
+    } catch {
+      return this.oauthFailureReturnTo(returnTo, provider, 'oauth_failed');
+    }
+  }
+
+  async redeemLoginTicket(ticket: string) {
+    if (!ticket) {
+      throw new UnauthorizedException('Login ticket is required.');
+    }
+    const ticketHash = this.hashToken(ticket);
+    const prisma = await this.getPrismaClient();
+    return prisma.$transaction(async (tx) => {
+      const row = await tx.oAuthLoginTicket.findUnique({
+        where: { ticketHash },
+      });
+      if (!row || row.consumedAt || row.expiresAt.getTime() <= Date.now()) {
+        throw new UnauthorizedException('Invalid login ticket.');
+      }
+      const tokens = await this.issueTokens(row.userId, tx);
+      const session = await tx.authSession.findUnique({
+        where: { refreshTokenHash: this.hashToken(tokens.refreshToken) },
+        include: { user: true },
+      });
+      await tx.oAuthLoginTicket.update({
+        where: { id: row.id },
+        data: {
+          consumedAt: new Date(),
+          sessionId: session?.id,
+        },
+      });
+      return tokens;
+    });
+  }
+
+  private async findOrCreateIdentityUserId(profile: {
+    provider: Provider;
+    providerUserId: string;
+    email: string;
+    name?: string;
+  }) {
+    const prisma = await this.getPrismaClient();
+    const found = await prisma.authIdentity.findUnique({
+      where: {
+        provider_providerUserId: {
           provider: profile.provider,
           providerUserId: profile.providerUserId,
-          email: profile.email,
-          name: profile.name,
-          createdAt: nowIso,
-          updatedAt: nowIso,
-        };
-    this.identitiesByKey.set(key, identity);
+        },
+      },
+      include: { user: true },
+    });
 
-    return this.issueTokens(identity.id);
+    const identity = found
+      ? await prisma.authIdentity.update({
+          where: { id: found.id },
+          data: {
+            email: profile.email,
+            name: profile.name ?? found.name ?? undefined,
+          },
+          include: { user: true },
+        })
+      : await this.createIdentity(profile);
+
+    await prisma.user.update({
+      where: { id: identity.userId },
+      data: {
+        email: profile.email,
+        name: profile.name ?? identity.user.name ?? undefined,
+      },
+    });
+
+    return identity.userId;
   }
 
-  refresh(refreshToken: string) {
+  async refresh(refreshToken: string) {
     const refreshHash = this.hashToken(refreshToken);
-    const session = this.sessionsByRefreshHash.get(refreshHash);
-    if (!session || session.revokedAt || session.refreshExpiresAt <= Date.now()) {
-      throw new UnauthorizedException('Invalid refresh token');
-    }
-    this.revokeByRefreshHash(refreshHash);
-    return this.issueTokens(session.userId);
+    const prisma = await this.getPrismaClient();
+    return prisma.$transaction(async (tx) => {
+      const session = await tx.authSession.findUnique({
+        where: { refreshTokenHash: refreshHash },
+        include: { user: true },
+      });
+      if (!session || session.revokedAt || session.refreshExpiresAt.getTime() <= Date.now()) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+      const revoked = await tx.authSession.updateMany({
+        where: {
+          refreshTokenHash: refreshHash,
+          revokedAt: null,
+          refreshExpiresAt: { gt: new Date() },
+        },
+        data: { revokedAt: new Date() },
+      });
+      if (revoked.count !== 1) {
+        throw new UnauthorizedException('Invalid refresh token');
+      }
+      return this.issueTokens(session.userId, tx);
+    });
   }
 
-  logout(refreshToken?: string, accessToken?: string) {
+  async logout(refreshToken?: string, accessToken?: string) {
     if (refreshToken) {
-      this.revokeByRefreshHash(this.hashToken(refreshToken));
+      await this.revokeByRefreshHash(this.hashToken(refreshToken));
     }
     if (accessToken) {
-      const refreshHash = this.accessToRefreshHash.get(accessToken);
-      if (refreshHash) {
-        this.revokeByRefreshHash(refreshHash);
-      }
+      await this.revokeByAccessHash(this.hashToken(accessToken));
     }
   }
 
-  getMe(accessToken: string) {
-    const refreshHash = this.accessToRefreshHash.get(accessToken);
-    if (!refreshHash) {
+  async getMe(accessToken: string) {
+    const prisma = await this.getPrismaClient();
+    const session = await prisma.authSession.findUnique({
+      where: { accessTokenHash: this.hashToken(accessToken) },
+      include: { user: true },
+    });
+    if (!session || session.revokedAt || session.accessExpiresAt.getTime() <= Date.now()) {
       throw new UnauthorizedException('Invalid access token');
-    }
-    const session = this.sessionsByRefreshHash.get(refreshHash);
-    if (!session || session.revokedAt || session.accessExpiresAt <= Date.now()) {
-      throw new UnauthorizedException('Invalid access token');
-    }
-
-    const identity = [...this.identitiesByKey.values()].find((item) => item.id === session.userId);
-    if (!identity) {
-      throw new UnauthorizedException('User not found');
     }
 
     return {
-      id: identity.id,
-      email: identity.email,
-      name: identity.name ?? null,
-      provider: identity.provider,
+      id: session.user.id,
+      email: session.user.email,
+      name: session.user.name ?? null,
+      provider: null,
     };
   }
 
-  private issueTokens(userId: string) {
+  private async issueTokens(userId: string, client?: AuthDbClient) {
     const accessToken = this.randomToken();
     const refreshToken = this.randomToken();
-    const refreshHash = this.hashToken(refreshToken);
     const now = Date.now();
-    const session: SessionRecord = {
-      userId,
-      refreshHash,
-      accessToken,
-      accessExpiresAt: now + this.accessTtlMs,
-      refreshExpiresAt: now + this.refreshTtlMs,
-    };
-
-    this.sessionsByRefreshHash.set(refreshHash, session);
-    this.accessToRefreshHash.set(accessToken, refreshHash);
+    const prisma = client ?? (await this.getPrismaClient());
+    await prisma.authSession.create({
+      data: {
+        userId,
+        accessTokenHash: this.hashToken(accessToken),
+        refreshTokenHash: this.hashToken(refreshToken),
+        accessExpiresAt: new Date(now + this.accessTtlMs),
+        refreshExpiresAt: new Date(now + this.refreshTtlMs),
+      },
+    });
 
     return {
       accessToken,
@@ -129,14 +359,63 @@ export class AuthService {
     };
   }
 
-  private revokeByRefreshHash(refreshHash: string) {
-    const session = this.sessionsByRefreshHash.get(refreshHash);
+  private async revokeByRefreshHash(refreshHash: string) {
+    const prisma = await this.getPrismaClient();
+    const session = await prisma.authSession.findUnique({
+      where: { refreshTokenHash: refreshHash },
+      include: { user: true },
+    });
     if (!session) {
       return;
     }
-    session.revokedAt = Date.now();
-    this.sessionsByRefreshHash.set(refreshHash, session);
-    this.accessToRefreshHash.delete(session.accessToken);
+    await this.revokeSession(session.id);
+  }
+
+  private async revokeByAccessHash(accessHash: string) {
+    const prisma = await this.getPrismaClient();
+    const session = await prisma.authSession.findUnique({
+      where: { accessTokenHash: accessHash },
+      include: { user: true },
+    });
+    if (!session) {
+      return;
+    }
+    await this.revokeSession(session.id);
+  }
+
+  private async revokeSession(id: string, client?: AuthDbClient) {
+    const prisma = client ?? (await this.getPrismaClient());
+    await prisma.authSession.update({
+      where: { id },
+      data: { revokedAt: new Date() },
+    });
+  }
+
+  private async createIdentity(profile: {
+    provider: Provider;
+    providerUserId: string;
+    email: string;
+    name?: string;
+  }) {
+    const prisma = await this.getPrismaClient();
+    const user =
+      (await prisma.user.findUnique({ where: { email: profile.email } })) ??
+      (await prisma.user.create({
+        data: {
+          email: profile.email,
+          name: profile.name,
+        },
+      }));
+    return prisma.authIdentity.create({
+      data: {
+        userId: user.id,
+        provider: profile.provider,
+        providerUserId: profile.providerUserId,
+        email: profile.email,
+        name: profile.name,
+      },
+      include: { user: true },
+    });
   }
 
   private async resolveSocialProfile(input: SocialLoginDto) {
@@ -316,12 +595,146 @@ export class AuthService {
     return accessToken;
   }
 
+  private assertSupportedProvider(provider: string): asserts provider is Provider {
+    if (provider !== 'google' && provider !== 'kakao' && provider !== 'naver') {
+      throw new BadRequestException('Unsupported OAuth provider.');
+    }
+  }
+
+  private assertAllowedReturnTo(returnTo: string) {
+    if (!this.allowedReturnToSet().has(returnTo)) {
+      throw new BadRequestException('Unsupported OAuth returnTo.');
+    }
+  }
+
+  private allowedReturnToSet() {
+    const raw = String(this.configService.oauthReturnToAllowlist ?? 'timefit://auth');
+    return new Set(
+      raw
+        .split(',')
+        .map((value) => value.trim())
+        .filter(Boolean),
+    );
+  }
+
+  private publicApiBaseUrl() {
+    return (this.configService.publicApiBaseUrl ?? 'http://localhost:3000').replace(/\/$/, '');
+  }
+
+  private providerCallbackUrl(provider: Provider) {
+    return `${this.publicApiBaseUrl()}/auth/${provider}/callback`;
+  }
+
+  private providerAuthorizeUrl(provider: Provider, redirectUri: string, state: string) {
+    if (provider === 'google') {
+      if (!this.configService.googleClientId) {
+        throw new UnauthorizedException('Google OAuth is not configured.');
+      }
+      return `https://accounts.google.com/o/oauth2/v2/auth?${new URLSearchParams({
+        client_id: this.configService.googleClientId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: 'openid profile email',
+        access_type: 'offline',
+        state,
+      }).toString()}`;
+    }
+
+    if (provider === 'kakao') {
+      if (!this.configService.kakaoRestApiKey) {
+        throw new UnauthorizedException('Kakao OAuth is not configured.');
+      }
+      return `https://kauth.kakao.com/oauth/authorize?${new URLSearchParams({
+        client_id: this.configService.kakaoRestApiKey,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        state,
+      }).toString()}`;
+    }
+
+    if (!this.configService.naverClientId) {
+      throw new UnauthorizedException('Naver OAuth is not configured.');
+    }
+    return `https://nid.naver.com/oauth2.0/authorize?${new URLSearchParams({
+      response_type: 'code',
+      client_id: this.configService.naverClientId,
+      redirect_uri: redirectUri,
+      state,
+    }).toString()}`;
+  }
+
+  private async consumeOAuthState(provider: Provider, state: string) {
+    const prisma = await this.getPrismaClient();
+    return prisma.$transaction(async (tx) => {
+      const row = await tx.oAuthState.findUnique({
+        where: { stateHash: this.hashToken(state) },
+      });
+      if (
+        !row ||
+        row.provider !== provider ||
+        row.consumedAt ||
+        row.expiresAt.getTime() <= Date.now()
+      ) {
+        throw new UnauthorizedException('Invalid OAuth state.');
+      }
+      await tx.oAuthState.update({
+        where: { id: row.id },
+        data: { consumedAt: new Date() },
+      });
+      return row;
+    });
+  }
+
+  private async createLoginTicket(userId: string) {
+    const ticket = this.randomToken();
+    const prisma = await this.getPrismaClient();
+    await prisma.oAuthLoginTicket.create({
+      data: {
+        userId,
+        ticketHash: this.hashToken(ticket),
+        expiresAt: new Date(Date.now() + this.loginTicketTtlMs),
+      },
+    });
+    return ticket;
+  }
+
+  private oauthFailureReturnTo(returnTo: string, provider: Provider, error: string) {
+    const safeReturnTo = this.allowedReturnToSet().has(returnTo) ? returnTo : 'timefit://auth';
+    return this.withQuery(safeReturnTo, { error, provider });
+  }
+
+  private withQuery(baseUrl: string, params: Record<string, string>) {
+    const url = new URL(baseUrl);
+    for (const [key, value] of Object.entries(params)) {
+      url.searchParams.set(key, value);
+    }
+    return url.toString();
+  }
+
   private randomToken() {
     return randomBytes(48).toString('base64url');
   }
 
   private hashToken(token: string) {
     return createHash('sha256').update(token).digest('hex');
+  }
+
+  private async getPrismaClient(): Promise<AuthDbClient> {
+    if (this.prisma) {
+      return this.prisma;
+    }
+
+    const globalForPrisma = globalThis as unknown as { prisma?: AuthDbClient };
+    const prismaModule = (await import('@prisma/client')) as unknown as {
+      PrismaClient: new () => AuthDbClient;
+    };
+
+    this.prisma = globalForPrisma.prisma ?? new prismaModule.PrismaClient();
+    if (!globalForPrisma.prisma) {
+      globalForPrisma.prisma = this.prisma;
+    }
+
+    return this.prisma;
   }
 
   private async fetchJson<T>(

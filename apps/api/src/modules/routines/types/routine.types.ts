@@ -14,6 +14,9 @@ export interface RoutineEntity {
   destination: RoutineLocation;
   weekdays: number[]; // 0(Sun) ~ 6(Sat)
   arrivalTime: string; // HH:mm
+  notificationEnabled: boolean;
+  notificationMinutesBefore: number;
+  favorite: boolean;
   savedRoute?: RouteCandidate;
   expoPushToken?: string;
   active: boolean;

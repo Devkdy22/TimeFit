@@ -13,13 +13,79 @@ model User {
   name            String?
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
+  authIdentities  AuthIdentity[]
+  oauthLoginTickets OAuthLoginTicket[]
+  authSessions    AuthSession[]
   devices         Device[]
+  idempotencyKeys IdempotencyKey[]
   places          Place[]
   preferences     Preference[]
   recommendations Recommendation[]
   routines        Routine[]
+  savedPlaces     SavedPlace[]
   trips           Trip[]
   notifications   Notification[]
+}
+
+model AuthIdentity {
+  id              String   @id @default(cuid())
+  userId          String
+  provider        String
+  providerUserId  String
+  email           String
+  name            String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([userId])
+}
+
+model AuthSession {
+  id                String    @id @default(cuid())
+  userId            String
+  accessTokenHash   String    @unique
+  refreshTokenHash  String    @unique
+  accessExpiresAt   DateTime
+  refreshExpiresAt  DateTime
+  revokedAt         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([refreshExpiresAt])
+}
+
+model OAuthState {
+  id          String    @id @default(cuid())
+  provider    String
+  stateHash   String    @unique
+  returnTo    String
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([provider])
+  @@index([expiresAt])
+}
+
+model OAuthLoginTicket {
+  id          String    @id @default(cuid())
+  ticketHash  String    @unique
+  userId      String
+  sessionId   String?
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 model Device {
@@ -94,19 +160,31 @@ model RecommendationRoute {
 }
 
 model Routine {
-  id               String   @id @default(cuid())
-  userId           String
-  title            String
-  originPlaceId    String?
-  destinationPlaceId String?
-  arrivalRule      String
-  isActive         Boolean  @default(true)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                          String    @id @default(cuid())
+  userId                      String
+  title                       String
+  originName                  String
+  originLat                   Float
+  originLng                   Float
+  destinationName             String
+  destinationLat              Float
+  destinationLng              Float
+  weekdays                    Int[]
+  arrivalTime                 String
+  notificationEnabled         Boolean   @default(true)
+  notificationMinutesBefore   Int       @default(10)
+  favorite                    Boolean   @default(false)
+  active                      Boolean   @default(true)
+  savedRoute                  Json?
+  expoPushToken               String?
+  lastTriggeredAt             DateTime?
+  createdAt                   DateTime  @default(now())
+  updatedAt                   DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([active])
 }
 
 model Trip {
@@ -180,6 +258,33 @@ model SavedPlace {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
   @@index([userId])
   @@unique([userId, normalizedLabel])
+}
+
+model IdempotencyKey {
+  id               String            @id @default(cuid())
+  userId           String
+  scope            String
+  key              String
+  payloadHash      String
+  status           IdempotencyStatus @default(PENDING)
+  responseSnapshot Json?
+  expiresAt        DateTime
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, scope, key])
+  @@index([expiresAt])
+  @@index([userId, scope])
+}
+
+enum IdempotencyStatus {
+  PENDING
+  COMPLETED
+  FAILED
 }

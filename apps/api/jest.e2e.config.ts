@@ -7,6 +7,16 @@ const config: Config = {
   roots: ['<rootDir>/test/e2e'],
   testMatch: ['**/*.e2e-spec.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
+  transform: {
+    '^.+\\.ts$': [
+      'ts-jest',
+      {
+        tsconfig: {
+          types: ['node', 'jest'],
+        },
+      },
+    ],
+  },
 };
 
 export default config;

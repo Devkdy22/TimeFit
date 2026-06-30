@@ -10,7 +10,7 @@ export interface AuthenticatedRequest extends Request {
 export class AuthAccessGuard implements CanActivate {
   constructor(private readonly authService: AuthService) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const bearer = request.headers.authorization;
     const accessToken = this.extractBearer(bearer);
@@ -21,7 +21,7 @@ export class AuthAccessGuard implements CanActivate {
       });
     }
 
-    const profile = this.authService.getMe(accessToken);
+    const profile = await this.authService.getMe(accessToken);
     request.authUserId = profile.id;
     return true;
   }

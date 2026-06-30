@@ -135,6 +135,14 @@ export class AppConfigService {
     return this.configService.get('REDIS_URL', { infer: true });
   }
 
+  get publicApiBaseUrl() {
+    return this.configService.get('PUBLIC_API_BASE_URL', { infer: true });
+  }
+
+  get oauthReturnToAllowlist() {
+    return this.configService.get('OAUTH_RETURN_TO_ALLOWLIST', { infer: true });
+  }
+
   get googleClientId() {
     return this.configService.get('GOOGLE_CLIENT_ID', { infer: true });
   }
