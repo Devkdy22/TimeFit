@@ -59,5 +59,34 @@ target 'TimeFit' do
       :mac_catalyst_enabled => false,
       :ccache_enabled => ccache_enabled?(podfile_properties),
     )
+
+    installer.aggregate_targets.each do |aggregate_target|
+      user_project = aggregate_target.user_project
+
+      user_project.native_targets.each do |native_target|
+        next unless native_target.name == 'TimeFit'
+
+        native_target.build_configurations.each do |build_configuration|
+          build_settings = build_configuration.build_settings
+          build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = podfile_properties['ios.deploymentTarget'] || '16.0'
+
+          framework_paths = build_settings['FRAMEWORK_SEARCH_PATHS'] ||= ['$(inherited)']
+          framework_paths = [framework_paths] if framework_paths.is_a?(String)
+          framework_path = '$(SRCROOT)/../../../node_modules/react-native-kakao-maps/ios'
+          framework_paths << framework_path unless framework_paths.include?(framework_path)
+          build_settings['FRAMEWORK_SEARCH_PATHS'] = framework_paths
+
+          other_ldflags = build_settings['OTHER_LDFLAGS'] ||= ['$(inherited)']
+          other_ldflags = other_ldflags.split(' ') if other_ldflags.is_a?(String)
+          other_ldflags = other_ldflags.each_with_index.reject do |flag, index|
+            flag == 'DaumMap' || (flag == '-framework' && other_ldflags[index + 1] == 'DaumMap')
+          end.map(&:first)
+          other_ldflags += ['-framework', 'DaumMap']
+          build_settings['OTHER_LDFLAGS'] = other_ldflags
+        end
+      end
+
+      user_project.save
+    end
   end
 end

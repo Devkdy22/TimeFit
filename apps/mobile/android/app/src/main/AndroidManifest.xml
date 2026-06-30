@@ -28,7 +28,9 @@
         <action android:name="android.intent.action.VIEW"/>
         <category android:name="android.intent.category.DEFAULT"/>
         <category android:name="android.intent.category.BROWSABLE"/>
-        <data android:scheme="timefit"/>
+        <data android:scheme="timefit" android:host="auth"/>
+        <data android:scheme="timefit" android:host="expo-development-client"/>
+        <data android:scheme="exp+timefit-mobile"/>
       </intent-filter>
     </activity>
   </application>

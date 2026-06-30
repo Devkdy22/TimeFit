@@ -8,6 +8,7 @@
     "orientation": "portrait",
     "plugins": [
       "expo-router",
+      "expo-dev-client",
       [
         "expo-location",
         {
@@ -25,6 +26,29 @@
     },
     "android": {
       "package": "com.devkdy.timefitmobile",
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "autoVerify": false,
+          "data": [
+            {
+              "scheme": "timefit",
+              "host": "auth"
+            },
+            {
+              "scheme": "timefit",
+              "host": "expo-development-client"
+            },
+            {
+              "scheme": "exp+timefit-mobile"
+            }
+          ],
+          "category": [
+            "BROWSABLE",
+            "DEFAULT"
+          ]
+        }
+      ],
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
@@ -38,6 +62,15 @@
     "ios": {
       "bundleIdentifier": "com.devkdy.timefitmobile",
       "infoPlist": {
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "timefit",
+              "exp+timefit-mobile",
+              "com.devkdy.timefitmobile"
+            ]
+          }
+        ],
         "NSLocationWhenInUseUsageDescription": "현재 위치를 출발지로 자동 설정하기 위해 위치 권한이 필요합니다."
       }
     },

@@ -38,6 +38,7 @@ public class AppDelegate: ExpoAppDelegate {
     open url: URL,
     options: [UIApplication.OpenURLOptionsKey: Any] = [:]
   ) -> Bool {
+    logAuthDeepLink(event: "open_url", url: url)
     return super.application(app, open: url, options: options) || RCTLinkingManager.application(app, open: url, options: options)
   }
 
@@ -49,6 +50,20 @@ public class AppDelegate: ExpoAppDelegate {
   ) -> Bool {
     let result = RCTLinkingManager.application(application, continue: userActivity, restorationHandler: restorationHandler)
     return super.application(application, continue: userActivity, restorationHandler: restorationHandler) || result
+  }
+
+  private func logAuthDeepLink(event: String, url: URL) {
+    guard url.scheme == "timefit", url.host == "auth" else {
+      return
+    }
+
+    let components = URLComponents(url: url, resolvingAgainstBaseURL: false)
+    let provider = components?.queryItems?.first(where: { $0.name == "provider" })?.value ?? "unknown"
+    let hasCode = !(components?.queryItems?.first(where: { $0.name == "code" })?.value?.isEmpty ?? true)
+    let hasState = !(components?.queryItems?.first(where: { $0.name == "state" })?.value?.isEmpty ?? true)
+
+    NSLog("[DeepLink][Runtime] event=%@ received=true provider=%@ redirectUri=timefit://auth url=%@", event, provider, url.absoluteString)
+    NSLog("[Auth][OAuth] event=oauth_deep_link_%@ provider=%@ hasCode=%@ hasState=%@ redirectUri=timefit://auth", event, provider, String(hasCode), String(hasState))
   }
 }
 

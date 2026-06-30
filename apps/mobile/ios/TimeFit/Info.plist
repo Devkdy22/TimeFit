@@ -28,6 +28,7 @@
 			<key>CFBundleURLSchemes</key>
 			<array>
 				<string>timefit</string>
+				<string>exp+timefit-mobile</string>
 				<string>com.devkdy.timefitmobile</string>
 			</array>
 		</dict>

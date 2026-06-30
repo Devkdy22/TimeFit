@@ -1,7 +1,9 @@
 package com.devkdy.timefitmobile
 
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -17,6 +19,13 @@ class MainActivity : ReactActivity() {
     // This is required for expo-splash-screen.
     setTheme(R.style.AppTheme);
     super.onCreate(null)
+    logAuthDeepLink("initial_intent", intent)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    logAuthDeepLink("new_intent", intent)
   }
 
   /**
@@ -57,5 +66,25 @@ class MainActivity : ReactActivity() {
       // Use the default back button implementation on Android S
       // because it's doing more than [Activity.moveTaskToBack] in fact.
       super.invokeDefaultOnBackPressed()
+  }
+
+  private fun logAuthDeepLink(event: String, intent: Intent?) {
+    val uri = intent?.data ?: return
+    if (uri.scheme != "timefit" || uri.host != "auth") {
+      return
+    }
+
+    val provider = uri.getQueryParameter("provider") ?: "unknown"
+    val hasCode = !uri.getQueryParameter("code").isNullOrBlank()
+    val hasState = !uri.getQueryParameter("state").isNullOrBlank()
+
+    Log.i(
+      "TimeFit",
+      "[DeepLink][Runtime] event=$event received=true provider=$provider redirectUri=timefit://auth url=$uri"
+    )
+    Log.i(
+      "TimeFit",
+      "[Auth][OAuth] event=oauth_deep_link_$event provider=$provider hasCode=$hasCode hasState=$hasState redirectUri=timefit://auth"
+    )
   }
 }
