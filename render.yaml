@@ -5,8 +5,8 @@ services:
     plan: free
     rootDir: .
     autoDeploy: false
-    buildCommand: corepack enable && corepack prepare pnpm@10.0.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @timefit/api prisma:generate && pnpm --filter @timefit/api... build
-    startCommand: corepack enable && corepack prepare pnpm@10.0.0 --activate && pnpm --filter @timefit/api start
+    buildCommand: corepack enable && corepack prepare pnpm@10.0.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @timefit/api prisma:generate && pnpm --filter @timefit/api exec prisma migrate deploy && pnpm --filter @timefit/api build
+    startCommand: cd apps/api && node dist/main.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
