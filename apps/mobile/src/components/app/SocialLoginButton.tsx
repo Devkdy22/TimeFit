@@ -6,6 +6,7 @@ interface SocialLoginButtonProps {
   provider: SocialProvider;
   label: string;
   loading?: boolean;
+  disabled?: boolean;
   onPress: () => void;
 }
 
@@ -15,14 +16,22 @@ const providerStyles: Record<SocialProvider, { backgroundColor: string; borderCo
   naver: { backgroundColor: '#03C75A', borderColor: '#03B453', color: '#FFFFFF', badge: 'N' },
 };
 
-export function SocialLoginButton({ provider, label, loading = false, onPress }: SocialLoginButtonProps) {
+export function SocialLoginButton({ provider, label, loading = false, disabled = false, onPress }: SocialLoginButtonProps) {
   const visual = providerStyles[provider];
+  const isDisabled = disabled || loading;
 
   return (
     <Pressable
       onPress={onPress}
-      disabled={loading}
-      style={({ pressed }) => [styles.button, { backgroundColor: visual.backgroundColor, borderColor: visual.borderColor, opacity: pressed ? 0.9 : 1 }]}
+      disabled={isDisabled}
+      style={({ pressed }) => [
+        styles.button,
+        {
+          backgroundColor: visual.backgroundColor,
+          borderColor: visual.borderColor,
+          opacity: isDisabled ? 0.58 : pressed ? 0.9 : 1,
+        },
+      ]}
     >
       <View style={styles.logoWrap}>
         <Text style={[styles.logo, { color: visual.color }]}>{visual.badge}</Text>

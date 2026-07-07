@@ -21,7 +21,7 @@ function resolveApiBaseUrl() {
   }
 }
 
-const API_BASE_URL = resolveApiBaseUrl();
+export const API_BASE_URL = resolveApiBaseUrl();
 const REFRESH_TIMEOUT_MS = 10_000;
 const DEV_MODE = typeof __DEV__ !== 'undefined' ? __DEV__ : process.env.NODE_ENV !== 'production';
 
@@ -38,6 +38,7 @@ interface AuthSessionBridge {
 const AUTH_PUBLIC_ALLOWLIST: ReadonlyArray<{ method?: string; pathPrefix: string }> = [
   { method: 'GET', pathPrefix: '/health' },
   { method: 'POST', pathPrefix: '/auth/social/login' },
+  { method: 'POST', pathPrefix: '/auth/session/redeem' },
   { method: 'POST', pathPrefix: '/auth/refresh' },
   { method: 'POST', pathPrefix: '/auth/logout' },
   { method: 'GET', pathPrefix: '/kakao-local/' },
@@ -599,6 +600,13 @@ export async function getHealth(): Promise<{ status: string; service: string }> 
     throw new Error(`Health check failed: ${response.status}`);
   }
   return response.json();
+}
+
+export async function checkOAuthServerHealth(signal?: AbortSignal | null): Promise<Response> {
+  return fetch(`${API_BASE_URL}/health`, {
+    method: 'GET',
+    signal: signal ?? undefined,
+  });
 }
 
 const RECOMMEND_CACHE_TTL_MS = 30_000;

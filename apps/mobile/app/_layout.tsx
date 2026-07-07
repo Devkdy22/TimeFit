@@ -71,6 +71,7 @@ export default function RootLayout() {
                 <Stack.Screen name="(in-transit)" />
                 <Stack.Screen name="(re-engage)" />
                 <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
+                <Stack.Screen name="auth" options={{ gestureEnabled: false }} />
                 <Stack.Screen name="(tabs)" />
                 <Stack.Screen name="search" />
                 <Stack.Screen name="route" />

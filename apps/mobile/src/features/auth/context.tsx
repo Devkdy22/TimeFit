@@ -5,6 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import {
   abortPendingAuthRefresh,
   buildOAuthStartUrl,
+  checkOAuthServerHealth,
   configureAuthSessionBridge,
   getMyAuthProfile,
   logoutAuthSession,
@@ -24,21 +25,72 @@ export interface PendingRoutineSeed {
 
 export type AuthSessionState = 'hydrating' | 'authenticated' | 'logged_out';
 
+export type OAuthWarmupStatus = 'checking' | 'ready' | 'error';
+
+export interface OAuthWarmupState {
+  visible: boolean;
+  provider: SocialProvider | null;
+  status: OAuthWarmupStatus;
+  elapsedMs: number;
+  progress: number;
+  message: string;
+  errorMessage: string | null;
+}
+
 interface AuthContextValue {
   authState: AuthSessionState;
   isAuthHydrating: boolean;
   isLoggedIn: boolean;
   isLoginLoading: boolean;
+  oauthWarmup: OAuthWarmupState;
   accessToken: string | null;
   profile: AuthProfile | null;
   pendingRoutineSeed: PendingRoutineSeed | null;
   getSessionGeneration: () => number;
   login: (provider: SocialProvider) => Promise<void>;
+  cancelOAuthWarmup: () => void;
+  redeemOAuthCallback: (input: OAuthCallbackInput) => Promise<OAuthCallbackRedeemResult>;
   logout: () => void;
   setPendingRoutineSeed: (seed: PendingRoutineSeed | null) => void;
 }
 
+export interface OAuthCallbackInput {
+  ticket?: string;
+  error?: string;
+  state?: string;
+  provider?: SocialProvider;
+  source?: 'auth_session_result' | 'auth_route';
+}
+
+export type OAuthCallbackRedeemResult = 'redeemed' | 'already_processed';
+
 const AuthContext = createContext<AuthContextValue | null>(null);
+
+const OAUTH_WARMUP_TIMEOUT_MS = 60_000;
+const OAUTH_WARMUP_INTERVAL_MS = 2_000;
+const OAUTH_HEALTH_REQUEST_TIMEOUT_MS = 4_000;
+const OAUTH_WARMUP_TIMEOUT_MESSAGE = '서버가 아직 준비되지 않았어요. 잠시 후 다시 시도해주세요.';
+const OAUTH_WARMUP_CANCELLED_MESSAGE = 'oauth_warmup_cancelled';
+const OAUTH_IN_PROGRESS_MESSAGE = 'oauth_in_progress';
+
+export function shouldSuppressLoginAlert(error: unknown) {
+  return (
+    error instanceof Error &&
+    (error.message === OAUTH_WARMUP_TIMEOUT_MESSAGE ||
+      error.message === OAUTH_WARMUP_CANCELLED_MESSAGE ||
+      error.message === OAUTH_IN_PROGRESS_MESSAGE)
+  );
+}
+
+const initialOAuthWarmupState: OAuthWarmupState = {
+  visible: false,
+  provider: null,
+  status: 'checking',
+  elapsedMs: 0,
+  progress: 0,
+  message: '서버 상태를 확인하고 있어요',
+  errorMessage: null,
+};
 
 type AuthSessionModule = {
   makeRedirectUri: (options?: {
@@ -219,10 +271,93 @@ function logOAuthCallback(event: string, url: string | null) {
   });
 }
 
+function getOAuthWarmupMessage(elapsedMs: number) {
+  if (elapsedMs >= 50_000) {
+    return '준비가 조금 늦어지고 있어요';
+  }
+  if (elapsedMs >= 30_000) {
+    return '거의 다 왔어요. 조금만 더 기다려주세요';
+  }
+  if (elapsedMs >= 10_000) {
+    return '타임이가 서버를 깨우고 있어요';
+  }
+  return '서버 상태를 확인하고 있어요';
+}
+
+function sleep(ms: number, signal?: AbortSignal | null) {
+  return new Promise<void>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new Error(OAUTH_WARMUP_CANCELLED_MESSAGE));
+      return;
+    }
+
+    const onResolve = () => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    };
+    const onAbort = () => {
+      clearTimeout(timeoutId);
+      signal?.removeEventListener('abort', onAbort);
+      reject(new Error(OAUTH_WARMUP_CANCELLED_MESSAGE));
+    };
+    const timeoutId = setTimeout(onResolve, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+function mergeWarmupSignals(signals: Array<AbortSignal | null | undefined>) {
+  const active = signals.filter((signal): signal is AbortSignal => Boolean(signal));
+  if (active.length === 0) {
+    return undefined;
+  }
+  const aborted = active.find((signal) => signal.aborted);
+  if (aborted) {
+    return aborted;
+  }
+
+  const controller = new AbortController();
+  const onAbort = () => {
+    controller.abort();
+    for (const signal of active) {
+      signal.removeEventListener('abort', onAbort);
+    }
+  };
+  for (const signal of active) {
+    signal.addEventListener('abort', onAbort);
+  }
+  return controller.signal;
+}
+
+async function requestOAuthHealth(attempt: number, signal?: AbortSignal | null) {
+  const timeoutController = new AbortController();
+  const timeoutId = setTimeout(() => {
+    timeoutController.abort();
+  }, OAUTH_HEALTH_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await checkOAuthServerHealth(mergeWarmupSignals([signal, timeoutController.signal]));
+    if (response.ok) {
+      return true;
+    }
+    console.info(`[Auth][OAuthWarmup] health_check_failed attempt=${attempt} status=${response.status}`);
+    return false;
+  } catch (error) {
+    if (signal?.aborted) {
+      throw new Error(OAUTH_WARMUP_CANCELLED_MESSAGE);
+    }
+    const reason = error instanceof Error && error.name === 'AbortError' ? 'timeout' : 'network_error';
+    console.info(`[Auth][OAuthWarmup] health_check_failed attempt=${attempt} status=${reason}`);
+    return false;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [authState, setAuthState] = useState<AuthSessionState>('hydrating');
   const [isLoggedIn, setLoggedIn] = useState(false);
   const [isLoginLoading, setLoginLoading] = useState(false);
+  const [oauthWarmup, setOAuthWarmup] = useState<OAuthWarmupState>(initialOAuthWarmupState);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [profile, setProfile] = useState<AuthProfile | null>(null);
   const [refreshToken, setRefreshToken] = useState<string | null>(null);
@@ -232,6 +367,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refreshTokenRef = useRef<string | null>(null);
   const sessionGenerationRef = useRef(0);
   const logoutInFlightRef = useRef(false);
+  const oauthInFlightRef = useRef(false);
+  const oauthWarmupAbortRef = useRef<AbortController | null>(null);
+  const oauthTicketPromisesRef = useRef(new Map<string, Promise<void>>());
+  const processedOAuthTicketsRef = useRef(new Set<string>());
 
   useEffect(() => {
     accessTokenRef.current = accessToken;
@@ -409,19 +548,185 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [clearLocalSession, hydrateProfile]);
 
+  const redeemOAuthCallback = useCallback(
+    async (input: OAuthCallbackInput): Promise<OAuthCallbackRedeemResult> => {
+      if (input.error) {
+        throw toAuthResultError(input.provider ?? 'google', 'provider_error', input.error);
+      }
+      if (!input.ticket) {
+        throw toAuthResultError(input.provider ?? 'google', 'success_missing_ticket', '로그인 티켓이 없습니다.');
+      }
+
+      const ticket = input.ticket;
+      if (processedOAuthTicketsRef.current.has(ticket)) {
+        console.info('[Auth][OAuth]', {
+          event: 'oauth_ticket_redeem_skipped',
+          provider: input.provider,
+          source: input.source,
+          reason: 'already_processed',
+          hasState: Boolean(input.state),
+        });
+        return 'already_processed';
+      }
+
+      const existing = oauthTicketPromisesRef.current.get(ticket);
+      if (existing) {
+        console.info('[Auth][OAuth]', {
+          event: 'oauth_ticket_redeem_joined',
+          provider: input.provider,
+          source: input.source,
+          hasState: Boolean(input.state),
+        });
+        await existing;
+        return 'already_processed';
+      }
+
+      const redeemPromise = (async () => {
+        console.info('[Auth][OAuth]', {
+          event: 'oauth_ticket_redeem_start',
+          provider: input.provider,
+          source: input.source,
+          hasState: Boolean(input.state),
+        });
+        const authTokens = await redeemOAuthLoginTicket(ticket);
+
+        logoutInFlightRef.current = false;
+        sessionGenerationRef.current += 1;
+        accessTokenRef.current = authTokens.accessToken;
+        refreshTokenRef.current = authTokens.refreshToken;
+        setAccessToken(authTokens.accessToken);
+        setRefreshToken(authTokens.refreshToken);
+        setAccessExpiresAt(Date.now() + authTokens.expiresIn * 1000);
+        await hydrateProfile(authTokens.accessToken);
+        setLoggedIn(true);
+        setAuthState('authenticated');
+        await AsyncStorage.multiSet([
+          ['auth.accessToken', authTokens.accessToken],
+          ['auth.refreshToken', authTokens.refreshToken],
+        ]);
+        processedOAuthTicketsRef.current.add(ticket);
+        console.info('[Auth][OAuth]', {
+          event: 'oauth_ticket_redeem_success',
+          provider: input.provider,
+          source: input.source,
+        });
+      })();
+
+      oauthTicketPromisesRef.current.set(ticket, redeemPromise);
+      try {
+        await redeemPromise;
+        return 'redeemed';
+      } finally {
+        oauthTicketPromisesRef.current.delete(ticket);
+      }
+    },
+    [hydrateProfile],
+  );
+
+  const waitForOAuthServerReady = useCallback(
+    async (provider: SocialProvider, signal: AbortSignal) => {
+      const startedAt = Date.now();
+      let attempt = 0;
+
+      while (Date.now() - startedAt < OAUTH_WARMUP_TIMEOUT_MS) {
+        const attemptStartedAt = Date.now();
+        const elapsedMs = Date.now() - startedAt;
+        setOAuthWarmup((current) => ({
+          ...current,
+          visible: true,
+          provider,
+          status: 'checking',
+          elapsedMs,
+          progress: Math.min(0.9, elapsedMs / OAUTH_WARMUP_TIMEOUT_MS),
+          message: getOAuthWarmupMessage(elapsedMs),
+          errorMessage: null,
+        }));
+
+        attempt += 1;
+        console.info(`[Auth][OAuthWarmup] health_check_attempt attempt=${attempt}`);
+        const ready = await requestOAuthHealth(attempt, signal);
+        if (ready) {
+          const readyElapsedMs = Date.now() - startedAt;
+          console.info(`[Auth][OAuthWarmup] health_check_success elapsedMs=${readyElapsedMs}`);
+          setOAuthWarmup((current) => ({
+            ...current,
+            visible: true,
+            provider,
+            status: 'ready',
+            elapsedMs: readyElapsedMs,
+            progress: 1,
+            message: '로그인 화면으로 이동할게요',
+            errorMessage: null,
+          }));
+          return;
+        }
+
+        const attemptElapsedMs = Date.now() - attemptStartedAt;
+        const remainingMs = OAUTH_WARMUP_TIMEOUT_MS - (Date.now() - startedAt);
+        if (remainingMs <= 0) {
+          break;
+        }
+        await sleep(Math.min(Math.max(0, OAUTH_WARMUP_INTERVAL_MS - attemptElapsedMs), remainingMs), signal);
+      }
+
+      const elapsedMs = Date.now() - startedAt;
+      console.info(`[Auth][OAuthWarmup] warmup_timeout elapsedMs=${elapsedMs}`);
+      setOAuthWarmup((current) => ({
+        ...current,
+        visible: true,
+        provider,
+        status: 'error',
+        elapsedMs,
+        progress: 1,
+        message: OAUTH_WARMUP_TIMEOUT_MESSAGE,
+        errorMessage: OAUTH_WARMUP_TIMEOUT_MESSAGE,
+      }));
+      throw new Error(OAUTH_WARMUP_TIMEOUT_MESSAGE);
+    },
+    [],
+  );
+
+  const cancelOAuthWarmup = useCallback(() => {
+    console.info('[Auth][OAuthWarmup] warmup_cancelled');
+    oauthWarmupAbortRef.current?.abort();
+    oauthWarmupAbortRef.current = null;
+    oauthInFlightRef.current = false;
+    setLoginLoading(false);
+    setOAuthWarmup(initialOAuthWarmupState);
+  }, []);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       authState,
       isAuthHydrating: authState === 'hydrating',
       isLoggedIn,
       isLoginLoading,
+      oauthWarmup,
       accessToken,
       profile,
       pendingRoutineSeed,
       getSessionGeneration: () => sessionGenerationRef.current,
       login: async (provider) => {
+        if (oauthInFlightRef.current) {
+          throw new Error(OAUTH_IN_PROGRESS_MESSAGE);
+        }
+        oauthInFlightRef.current = true;
         setLoginLoading(true);
+        const warmupAbortController = new AbortController();
+        oauthWarmupAbortRef.current = warmupAbortController;
+        let keepWarmupErrorVisible = false;
         try {
+          console.info(`[Auth][OAuthWarmup] warmup_start provider=${provider}`);
+          setOAuthWarmup({
+            visible: true,
+            provider,
+            status: 'checking',
+            elapsedMs: 0,
+            progress: 0,
+            message: '서버 상태를 확인하고 있어요',
+            errorMessage: null,
+          });
+          await waitForOAuthServerReady(provider, warmupAbortController.signal);
           const { authSession, webBrowser: WebBrowser } = await loadAuthSessionModules();
           const redirectResolution = resolveRedirectUri(authSession as AuthSessionModule);
           const redirectUri = redirectResolution.redirectUri;
@@ -439,6 +744,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             redirectUri,
             authUrl: summarizeAuthUrl(authUrl),
           });
+          console.info(`[Auth][OAuthWarmup] open_auth_session_after_ready provider=${provider}`);
           const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectUri);
           const resultLog = buildAuthResultLog(result as Record<string, unknown>);
           console.info('[Auth][OAuth]', {
@@ -454,36 +760,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (!result.url) {
             throw toAuthResultError(provider, 'success_missing_url', '콜백 URL이 없습니다.');
           }
-          const { error, ticket } = readCallbackParams(result.url);
-          if (error) {
-            throw toAuthResultError(provider, 'provider_error', error);
-          }
-          if (!ticket) {
-            throw toAuthResultError(provider, 'success_missing_ticket', '로그인 티켓이 없습니다.');
-          }
-          const authTokens = await redeemOAuthLoginTicket(ticket);
-
-          logoutInFlightRef.current = false;
-          sessionGenerationRef.current += 1;
-          accessTokenRef.current = authTokens.accessToken;
-          refreshTokenRef.current = authTokens.refreshToken;
-          setAccessToken(authTokens.accessToken);
-          setRefreshToken(authTokens.refreshToken);
-          setAccessExpiresAt(Date.now() + authTokens.expiresIn * 1000);
-          await hydrateProfile(authTokens.accessToken);
-          setLoggedIn(true);
-          setAuthState('authenticated');
-          await AsyncStorage.multiSet([
-            ['auth.accessToken', authTokens.accessToken],
-            ['auth.refreshToken', authTokens.refreshToken],
-          ]);
+          const { error, ticket, state } = readCallbackParams(result.url);
+          await redeemOAuthCallback({
+            error,
+            ticket,
+            state,
+            provider: readCallbackProvider(result.url) ?? provider,
+            source: 'auth_session_result',
+          });
         } catch (error) {
+          if (error instanceof Error && error.message === OAUTH_WARMUP_TIMEOUT_MESSAGE) {
+            keepWarmupErrorVisible = true;
+          }
           if (error instanceof Error) {
             throw error;
           }
           throw new Error('로그인 처리 중 알 수 없는 오류가 발생했습니다.');
         } finally {
+          oauthInFlightRef.current = false;
+          if (oauthWarmupAbortRef.current === warmupAbortController) {
+            oauthWarmupAbortRef.current = null;
+          }
           setLoginLoading(false);
+          if (!keepWarmupErrorVisible) {
+            setOAuthWarmup(initialOAuthWarmupState);
+          }
         }
       },
       logout: () => {
@@ -494,18 +795,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           void logoutAuthSession(currentRefresh, currentAccess ?? undefined);
         }
       },
+      redeemOAuthCallback,
+      cancelOAuthWarmup,
       setPendingRoutineSeed,
     }),
     [
       accessToken,
       authState,
+      cancelOAuthWarmup,
       clearLocalSession,
       hydrateProfile,
       isLoggedIn,
       isLoginLoading,
+      oauthWarmup,
       pendingRoutineSeed,
       profile,
+      redeemOAuthCallback,
       refreshToken,
+      waitForOAuthServerReady,
     ],
   );
 
