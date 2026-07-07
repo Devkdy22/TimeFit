@@ -65,6 +65,7 @@ function createAuthDb() {
 
   const db = {
     users,
+    identities,
     sessions,
     oauthStates,
     loginTickets,
@@ -285,7 +286,7 @@ function createAuthDb() {
   return db as typeof db & { client: Record<string, unknown> };
 }
 
-function createService(db = createAuthDb()) {
+function createService(db = createAuthDb(), options: { stubSocialProfile?: boolean } = {}) {
   const config = {
     googleClientId: 'google-client',
     googleClientSecret: 'google-secret',
@@ -303,17 +304,19 @@ function createService(db = createAuthDb()) {
       'getPrismaClient',
     ) as jest.Mock
   ).mockResolvedValue(db.client);
-  (
-    jest.spyOn(
-      service as unknown as { resolveSocialProfile: () => Promise<unknown> },
-      'resolveSocialProfile',
-    ) as jest.Mock
-  ).mockResolvedValue({
-      provider: 'google',
-      providerUserId: 'provider-user-1',
-      email: 'user@example.com',
-      name: 'User',
-    });
+  if (options.stubSocialProfile ?? true) {
+    (
+      jest.spyOn(
+        service as unknown as { resolveSocialProfile: () => Promise<unknown> },
+        'resolveSocialProfile',
+      ) as jest.Mock
+    ).mockResolvedValue({
+        provider: 'google',
+        providerUserId: 'provider-user-1',
+        email: 'user@example.com',
+        name: 'User',
+      });
+  }
   return { service, db };
 }
 
@@ -376,6 +379,30 @@ describe('AuthService persistence', () => {
     await expect(service.getMe(login.accessToken)).rejects.toBeInstanceOf(UnauthorizedException);
   });
 
+  it('creates and reuses a Kakao identity when account email is missing', async () => {
+    const { service, db } = createService(undefined, { stubSocialProfile: false });
+    (
+      jest.spyOn(
+        service as unknown as { fetchJson: () => Promise<unknown> },
+        'fetchJson',
+      ) as jest.Mock
+    ).mockResolvedValue({
+      id: 12345,
+      kakao_account: {
+        profile: { nickname: 'Kakao User' },
+      },
+    });
+
+    const firstLogin = await service.socialLogin({ provider: 'kakao', accessToken: 'kakao-access' });
+    const secondLogin = await service.socialLogin({ provider: 'kakao', accessToken: 'kakao-access' });
+
+    expect(firstLogin.userId).toBe(secondLogin.userId);
+    expect(db.users.size).toBe(1);
+    expect(db.identities.size).toBe(1);
+    expect([...db.identities.values()][0]?.email).toBe('kakao_12345@timefit.local');
+    expect([...db.users.values()][0]?.email).toBe('kakao_12345@timefit.local');
+  });
+
   it('starts backend OAuth with an HTTPS provider callback and stored state', async () => {
     const { service, db } = createService();
 
@@ -386,6 +413,22 @@ describe('AuthService persistence', () => {
     expect(parsed.searchParams.get('redirect_uri')).toBe('https://api.example.com/auth/google/callback');
     expect(parsed.searchParams.get('state')).toBeTruthy();
     expect(db.oauthStates.size).toBe(1);
+    expect([...db.oauthStates.values()][0]?.returnTo).toBe('timefit://auth');
+  });
+
+  it('starts Kakao OAuth with the backend HTTPS callback as redirect_uri', async () => {
+    const { service, db } = createService();
+
+    const redirectUrl = await service.startOAuth('kakao', 'timefit://auth');
+    const parsed = new URL(redirectUrl);
+
+    expect(parsed.origin + parsed.pathname).toBe('https://kauth.kakao.com/oauth/authorize');
+    expect(parsed.searchParams.get('client_id')).toBe('kakao-rest');
+    expect(parsed.searchParams.get('redirect_uri')).toBe('https://api.example.com/auth/kakao/callback');
+    expect(parsed.searchParams.get('response_type')).toBe('code');
+    expect(parsed.searchParams.get('state')).toBeTruthy();
+    expect(db.oauthStates.size).toBe(1);
+    expect([...db.oauthStates.values()][0]?.provider).toBe('kakao');
     expect([...db.oauthStates.values()][0]?.returnTo).toBe('timefit://auth');
   });
 
@@ -437,6 +480,55 @@ describe('AuthService persistence', () => {
     expect(tokens.refreshToken).toBeTruthy();
     expect(tokens.userId).toBe('user-1');
     expect([...db.loginTickets.values()][0]?.consumedAt).toBeInstanceOf(Date);
+  });
+
+  it('Kakao callback redirects back to the app deep link with a one-time ticket', async () => {
+    const { service } = createService();
+    const redirectUrl = await service.startOAuth('kakao', 'timefit://auth');
+    const state = new URL(redirectUrl).searchParams.get('state') ?? '';
+
+    const appRedirect = await service.completeOAuthCallback('kakao', {
+      code: 'provider-code',
+      state,
+    });
+    const appRedirectUrl = new URL(appRedirect);
+
+    expect(appRedirectUrl.protocol).toBe('timefit:');
+    expect(appRedirectUrl.host).toBe('auth');
+    expect(appRedirectUrl.searchParams.get('ticket')).toBeTruthy();
+    expect(appRedirectUrl.searchParams.get('state')).toBe(state);
+    expect(appRedirectUrl.searchParams.get('provider')).toBe('kakao');
+  });
+
+  it('Kakao callback continues to app ticket redirect when account email is missing', async () => {
+    const { service } = createService(undefined, { stubSocialProfile: false });
+    (
+      jest.spyOn(
+        service as unknown as { fetchJson: () => Promise<unknown> },
+        'fetchJson',
+      ) as jest.Mock
+    )
+      .mockResolvedValueOnce({ access_token: 'kakao-access' })
+      .mockResolvedValueOnce({
+        id: 67890,
+        kakao_account: {
+          profile: { nickname: 'No Email Kakao User' },
+        },
+      });
+    const redirectUrl = await service.startOAuth('kakao', 'timefit://auth');
+    const state = new URL(redirectUrl).searchParams.get('state') ?? '';
+
+    const appRedirect = await service.completeOAuthCallback('kakao', {
+      code: 'provider-code',
+      state,
+    });
+    const appRedirectUrl = new URL(appRedirect);
+
+    expect(appRedirectUrl.protocol).toBe('timefit:');
+    expect(appRedirectUrl.host).toBe('auth');
+    expect(appRedirectUrl.searchParams.get('ticket')).toBeTruthy();
+    expect(appRedirectUrl.searchParams.get('error')).toBeNull();
+    expect(appRedirectUrl.searchParams.get('provider')).toBe('kakao');
   });
 
   it('rejects reused, expired, and invalid login tickets', async () => {

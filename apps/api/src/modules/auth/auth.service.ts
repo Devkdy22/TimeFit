@@ -174,6 +174,11 @@ export class AuthService {
     const state = this.randomToken();
     const redirectUri = this.providerCallbackUrl(provider);
     const authorizeUrl = this.providerAuthorizeUrl(provider, redirectUri, state);
+    this.logKakaoOAuthEvent(provider, {
+      event: 'kakao.oauth.start_authorize_url_created',
+      redirectUri,
+      returnTo,
+    });
     const prisma = await this.getPrismaClient();
     await prisma.oAuthState.create({
       data: {
@@ -189,10 +194,24 @@ export class AuthService {
 
   async completeOAuthCallback(provider: Provider, input: { code?: string; state?: string; error?: string }) {
     this.assertSupportedProvider(provider);
+    this.logKakaoOAuthEvent(provider, {
+      event: 'kakao.oauth.callback_received',
+      hasCode: Boolean(input.code),
+      hasState: Boolean(input.state),
+      hasProviderError: Boolean(input.error),
+    });
     if (input.error) {
+      this.logKakaoOAuthEvent(provider, {
+        event: 'kakao.oauth.callback_provider_error',
+        redirectTo: 'timefit://auth',
+      });
       return this.oauthFailureReturnTo('timefit://auth', provider, 'provider_error');
     }
     if (!input.code || !input.state) {
+      this.logKakaoOAuthEvent(provider, {
+        event: 'kakao.oauth.callback_missing_code_or_state',
+        redirectTo: 'timefit://auth',
+      });
       return this.oauthFailureReturnTo('timefit://auth', provider, 'missing_code_or_state');
     }
 
@@ -200,6 +219,11 @@ export class AuthService {
     try {
       const state = await this.consumeOAuthState(provider, input.state);
       returnTo = state.returnTo;
+      this.logKakaoOAuthEvent(provider, {
+        event: 'kakao.oauth.callback_state_consumed',
+        returnTo,
+        tokenRedirectUri: this.providerCallbackUrl(provider),
+      });
       const profile = await this.resolveSocialProfile({
         provider,
         authorizationCode: input.code,
@@ -208,8 +232,20 @@ export class AuthService {
       });
       const userId = await this.findOrCreateIdentityUserId(profile);
       const ticket = await this.createLoginTicket(userId);
-      return this.withQuery(returnTo, { ticket, state: input.state, provider });
-    } catch {
+      const appRedirectUrl = this.withQuery(returnTo, { ticket, state: input.state, provider });
+      this.logKakaoOAuthEvent(provider, {
+        event: 'kakao.oauth.callback_app_redirect_created',
+        redirectBase: returnTo,
+        hasTicket: true,
+        hasState: true,
+      });
+      return appRedirectUrl;
+    } catch (error) {
+      this.logKakaoOAuthEvent(provider, {
+        event: 'kakao.oauth.callback_failed',
+        returnTo,
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
       return this.oauthFailureReturnTo(returnTo, provider, 'oauth_failed');
     }
   }
@@ -460,9 +496,15 @@ export class AuthService {
       });
 
       const providerUserId = payload.id ? String(payload.id) : '';
-      const email = payload.kakao_account?.email ?? '';
-      if (!providerUserId || !email) {
+      if (!providerUserId) {
         throw new UnauthorizedException('Invalid Kakao token payload.');
+      }
+      const email = payload.kakao_account?.email?.trim() || this.kakaoInternalEmail(providerUserId);
+      if (!payload.kakao_account?.email?.trim()) {
+        this.logKakaoOAuthEvent('kakao', {
+          event: 'kakao.oauth.profile_email_missing',
+          fallbackEmailDomain: 'timefit.local',
+        });
       }
       return {
         provider: 'kakao' as const,
@@ -709,6 +751,18 @@ export class AuthService {
       url.searchParams.set(key, value);
     }
     return url.toString();
+  }
+
+  private logKakaoOAuthEvent(provider: Provider, payload: Record<string, unknown>) {
+    if (provider !== 'kakao') {
+      return;
+    }
+    const logger = this.logger as { log?: (message: unknown, context?: string) => void };
+    logger.log?.(payload, AuthService.name);
+  }
+
+  private kakaoInternalEmail(providerUserId: string) {
+    return `kakao_${encodeURIComponent(providerUserId)}@timefit.local`;
   }
 
   private randomToken() {
