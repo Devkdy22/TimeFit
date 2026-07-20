@@ -21,7 +21,8 @@
 
 ## Kakao
 
-- REST API Key exists and matches `EXPO_PUBLIC_KAKAO_REST_API_KEY`.
+- REST API Key exists and matches backend `KAKAO_REST_API_KEY`.
+- Mobile may use only the public JavaScript key as `EXPO_PUBLIC_KAKAO_JS_KEY` for the map WebView.
 - Android package name is `com.devkdy.timefitmobile`.
 - Android key hash matches the installed Dev Build signing key.
 - iOS bundle id is `com.devkdy.timefitmobile`.
@@ -40,6 +41,7 @@
 
 - `apps/mobile/.env` must include:
   - `EXPO_PUBLIC_API_URL`
+  - `EXPO_PUBLIC_KAKAO_JS_KEY`
 - `apps/api/.env` must include:
   - `PUBLIC_API_BASE_URL`
   - `OAUTH_RETURN_TO_ALLOWLIST=timefit://auth`
