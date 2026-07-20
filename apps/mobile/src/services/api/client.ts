@@ -57,6 +57,10 @@ export function configureAuthSessionBridge(next: AuthSessionBridge | null): void
   }
 }
 
+export function getCurrentAccessTokenForTransport(): string | null {
+  return authBridge?.getAccessToken() ?? null;
+}
+
 export function abortPendingAuthRefresh(): void {
   if (refreshAbortController) {
     refreshAbortController.abort();
@@ -332,6 +336,17 @@ export interface TripStartResult {
   targetArrivalTime: string;
 }
 
+export interface TripSnapshotResult {
+  trip: {
+    id: string;
+    userId?: string;
+    status: 'preparing' | 'moving' | 'arrived' | string;
+  };
+  route: MobilityRoutePayload | null;
+  status: '여유' | '주의' | '긴급' | null;
+  bufferMinutes: number | null;
+}
+
 export interface TripPositionRequest {
   lat: number;
   lng: number;
@@ -400,9 +415,6 @@ interface ApiEnvelope<T> {
   success: boolean;
   data: T;
 }
-
-const ODSAY_ENDPOINT = 'https://api.odsay.com/v1/api/searchPubTransPathT';
-const ODSAY_DETAILED_ENDPOINT = 'https://api.odsay.com/v1/api/searchPubTransPath';
 
 function logApi(message: string, data?: Record<string, unknown>) {
   if (data) {
@@ -712,453 +724,67 @@ export async function fetchRouteCandidates(input: {
   origin: RecommendLocation;
   destination: RecommendLocation;
 }) {
-  const candidates = await fetchOdsayRouteCandidatesDirect(input);
-  if (candidates.length === 0) {
-    throw new Error('추천 가능한 대중교통 경로가 없습니다.');
+  const response = await fetch(`${API_BASE_URL}/routes`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) {
+    throw new Error(`Route candidates failed: ${response.status}`);
   }
-  return {
-    source: 'api' as const,
-    fetchedAt: new Date().toISOString(),
-    cacheableForMs: 30_000,
-    candidates,
-  };
+  const data = await readApiEnvelope<{
+    source: 'api' | 'fallback';
+    status: 'OK' | 'NO_RESULT' | 'MAPPING_FAILED' | 'PROVIDER_TIMEOUT' | 'PROVIDER_DOWN' | 'INVALID_INPUT';
+    fetchedAt: string;
+    cacheableForMs: number;
+    candidates: MobilityRoutePayload[];
+    emptyState?: {
+      description?: string;
+    };
+  }>(response);
+  if (data.status !== 'OK' || data.candidates.length === 0) {
+    throw new Error(data.emptyState?.description || '추천 가능한 대중교통 경로가 없습니다.');
+  }
+  return data;
 }
 
 export async function fetchKakaoWalkGeometry(input: {
   origin: RecommendLocation;
   destination: RecommendLocation;
 }): Promise<KakaoWalkGeometryPoint[]> {
-  const apiKey = process.env.EXPO_PUBLIC_KAKAO_REST_API_KEY ?? '';
-  if (!apiKey) {
-    throw new Error('EXPO_PUBLIC_KAKAO_REST_API_KEY is required for Kakao Directions API');
-  }
-
   const params = new URLSearchParams({
-    origin: `${input.origin.lng},${input.origin.lat}`,
-    destination: `${input.destination.lng},${input.destination.lat}`,
-    priority: 'RECOMMEND',
-    alternatives: 'false',
-    road_details: 'false',
+    originLat: String(input.origin.lat),
+    originLng: String(input.origin.lng),
+    destinationLat: String(input.destination.lat),
+    destinationLng: String(input.destination.lng),
   });
 
-  const response = await fetch(`https://apis-navi.kakaomobility.com/v1/directions?${params.toString()}`, {
-    headers: {
-      Authorization: `KakaoAK ${apiKey}`,
-    },
-  });
+  const response = await fetch(`${API_BASE_URL}/kakao-local/directions/walk?${params.toString()}`);
   if (!response.ok) {
-    throw new Error(`Kakao Directions failed: ${response.status}`);
+    throw new Error(`Kakao Directions proxy failed: ${response.status}`);
   }
+  const data = await readApiEnvelope<{
+    points: KakaoWalkGeometryPoint[];
+  }>(response);
+  return data.points;
+}
 
-  const body = (await response.json()) as {
-    routes?: Array<{
-      sections?: Array<{
-        roads?: Array<{
-          vertexes?: number[];
-        }>;
-      }>;
-    }>;
+export async function startTripTracking(
+  input: TripStartRequest,
+  options: { idempotencyKey?: string } = {},
+): Promise<TripStartResult> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
   };
-
-  const vertexes = (body.routes?.[0]?.sections ?? [])
-    .flatMap((section) => section.roads ?? [])
-    .flatMap((road) => road.vertexes ?? []);
-
-  if (vertexes.length < 4) {
-    return [];
+  if (options.idempotencyKey) {
+    headers['Idempotency-Key'] = options.idempotencyKey;
   }
 
-  const points: KakaoWalkGeometryPoint[] = [];
-  for (let index = 0; index < vertexes.length - 1; index += 2) {
-    const lng = Number(vertexes[index]);
-    const lat = Number(vertexes[index + 1]);
-    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      continue;
-    }
-    points.push({ lat, lng });
-  }
-  return points;
-}
-
-async function fetchOdsayRouteCandidatesDirect(input: {
-  origin: RecommendLocation;
-  destination: RecommendLocation;
-}): Promise<MobilityRoutePayload[]> {
-  logApi('odsay direct call start', {
-    endpoint: 'odsay/searchPubTransPathT',
-    origin: input.origin,
-    destination: input.destination,
-  });
-
-  const apiKey = process.env.EXPO_PUBLIC_ODSAY_API_KEY?.trim();
-  if (!apiKey) {
-    logApi('odsay direct call fail', {
-      endpoint: 'odsay/searchPubTransPathT',
-      reason: 'missing_key',
-    });
-    throw new Error('ODSAY API 키가 없습니다. EXPO_PUBLIC_ODSAY_API_KEY를 설정해주세요.');
-  }
-
-  const params = new URLSearchParams({
-    SX: String(input.origin.lng),
-    SY: String(input.origin.lat),
-    EX: String(input.destination.lng),
-    EY: String(input.destination.lat),
-    apiKey,
-    SearchType: '0',
-    SearchPathType: '0',
-    OPT: '0',
-  });
-
-  const response = await fetch(`${ODSAY_ENDPOINT}?${params.toString()}`);
-  let body = (await response.json()) as {
-    result?: {
-      path?: Array<{
-        pathType?: number;
-        info?: { totalTime?: number };
-      subPath?: Array<{
-          trafficType?: number | string;
-          sectionTime?: number;
-          distance?: number;
-          stationCount?: number;
-          lane?: Array<{
-            name?: string;
-            busNo?: string;
-            busID?: string | number;
-            busLocalBlID?: string | number;
-            busRouteId?: string | number;
-            routeId?: string | number;
-            subwayCode?: string | number;
-            subwayID?: string | number;
-            subwayId?: string | number;
-          }>;
-          startName?: string;
-          endName?: string;
-          startX?: number;
-          startY?: number;
-          endX?: number;
-          endY?: number;
-          startID?: string | number;
-          endID?: string | number;
-          stationID?: string | number;
-          stationID2?: string | number;
-          passStopList?: {
-            stations?: Array<{
-              x?: number | string;
-              y?: number | string;
-              stationName?: string;
-              stationID?: string | number;
-              stationId?: string | number;
-            }>;
-          };
-        }>;
-      }>;
-      error?: { code?: number | string; msg?: string; message?: string };
-    };
-    error?: { code?: number | string; msg?: string; message?: string } | Array<{ code?: string; message?: string }>;
-  };
-
-  let providerError = normalizeOdsayError(body);
-  let paths = body.result?.path ?? [];
-  if (!providerError && paths.length > 0 && !hasAnyPassStops(paths)) {
-    const detailedResponse = await fetch(`${ODSAY_DETAILED_ENDPOINT}?${params.toString()}`);
-    if (detailedResponse.ok) {
-      const detailedBody = (await detailedResponse.json()) as typeof body;
-      const detailedError = normalizeOdsayError(detailedBody);
-      const detailedPaths = detailedBody.result?.path ?? [];
-      if (!detailedError && detailedPaths.length > 0 && hasAnyPassStops(detailedPaths)) {
-        body = detailedBody;
-        providerError = detailedError;
-        paths = detailedPaths;
-        logApi('odsay direct path upgraded', {
-          endpoint: 'odsay/searchPubTransPath',
-          pathCount: detailedPaths.length,
-        });
-      }
-    }
-  }
-
-  if (providerError) {
-    logApi('odsay direct call fail', {
-      endpoint: 'odsay/searchPubTransPathT',
-      code: providerError.code,
-      message: providerError.message,
-    });
-    throw new Error(`ODSAY 호출 실패(${providerError.code}): ${providerError.message}`);
-  }
-
-  const candidates = paths
-    .slice(0, 5)
-    .map((path, index) => mapOdsayPathToRoute(path, index))
-    .filter((route): route is MobilityRoutePayload => route !== null);
-  logApi('odsay direct call success', {
-    endpoint: 'odsay/searchPubTransPathT',
-    pathCount: paths.length,
-    candidateCount: candidates.length,
-  });
-  return candidates;
-}
-
-function normalizeOdsayError(body: {
-  result?: { error?: { code?: number | string; msg?: string; message?: string } };
-  error?: { code?: number | string; msg?: string; message?: string } | Array<{ code?: string; message?: string }>;
-}): { code: string; message: string } | null {
-  if (Array.isArray(body.error) && body.error[0]) {
-    return {
-      code: String(body.error[0].code ?? 'unknown'),
-      message: body.error[0].message ?? 'unknown_error',
-    };
-  }
-
-  const rootError = body.error as { code?: number | string; msg?: string; message?: string } | undefined;
-  const nested = body.result?.error;
-  const error = rootError ?? nested;
-  if (!error) {
-    return null;
-  }
-
-  return {
-    code: String(error.code ?? 'unknown'),
-    message: error.msg ?? error.message ?? 'unknown_error',
-  };
-}
-
-function hasAnyPassStops(paths: Array<{ subPath?: Array<{ passStopList?: { stations?: unknown[] } }> }>) {
-  return paths.some((path) =>
-    (path.subPath ?? []).some((subPath) => (subPath.passStopList?.stations?.length ?? 0) > 0),
-  );
-}
-
-function readText(value: unknown): string | undefined {
-  if (value === null || value === undefined) {
-    return undefined;
-  }
-  const text = String(value).trim();
-  return text.length > 0 ? text : undefined;
-}
-
-function mapOdsayPathToRoute(
-  path: {
-    info?: { totalTime?: number };
-    subPath?: Array<{
-      trafficType?: number | string;
-      sectionTime?: number;
-      distance?: number;
-      stationCount?: number;
-      lane?: Array<{
-        name?: string;
-        busNo?: string;
-        busID?: string | number;
-        busLocalBlID?: string | number;
-        busRouteId?: string | number;
-        routeId?: string | number;
-        subwayCode?: string | number;
-        subwayID?: string | number;
-        subwayId?: string | number;
-      }>;
-      startName?: string;
-      endName?: string;
-      startX?: number;
-      startY?: number;
-      endX?: number;
-      endY?: number;
-      startID?: string | number;
-      endID?: string | number;
-      stationID?: string | number;
-      stationID2?: string | number;
-      passStopList?: {
-        stations?: Array<{
-          x?: number | string;
-          y?: number | string;
-          stationName?: string;
-          stationID?: string | number;
-          stationId?: string | number;
-        }>;
-      };
-    }>;
-  },
-  index: number,
-): MobilityRoutePayload | null {
-  type MobilitySegmentPayload = {
-    mode: 'walk' | 'bus' | 'subway';
-    durationMinutes: number;
-    lineLabel?: string;
-    lineId?: string;
-    startName?: string;
-    endName?: string;
-    startStationId?: string;
-    endStationId?: string;
-    busRouteId?: string;
-    startLat?: number;
-    startLng?: number;
-    endLat?: number;
-    endLng?: number;
-    pathPoints?: Array<{
-      lat: number;
-      lng: number;
-      label?: string;
-    }>;
-    passStops?: string[];
-    routeGeometry?: Array<{
-      lat: number;
-      lng: number;
-    }>;
-    distanceMeters?: number;
-    realtimeInfo?: {
-      etaMinutes?: number;
-      matchingConfidence?: number;
-      trainStatusMessage?: string;
-    };
-  };
-
-  const subPath = path.subPath ?? [];
-  const mappedSegments: Array<MobilitySegmentPayload | null> = subPath.map((segment) => {
-      const type = Number(segment.trafficType);
-      const mode = type === 1 ? 'subway' : type === 2 ? 'bus' : type === 3 ? 'walk' : null;
-      if (!mode) {
-        return null;
-      }
-      const durationMinutes = Number(segment.sectionTime ?? 0);
-      if (!Number.isFinite(durationMinutes) || durationMinutes < 0) {
-        return null;
-      }
-      const stopPointsRaw =
-        segment.passStopList?.stations?.map((station) => {
-          const lat = Number(station.y);
-          const lng = Number(station.x);
-          if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-            return null;
-          }
-          return {
-            lat,
-            lng,
-            label: station.stationName,
-          };
-        }) ?? [];
-      const stopPoints = stopPointsRaw.filter(Boolean) as Array<{
-        lat: number;
-        lng: number;
-        label?: string;
-      }>;
-      const lane = segment.lane?.[0];
-      const busRouteIdResolved =
-        mode === 'bus'
-          ? readText(lane?.busRouteId) ??
-            readText(lane?.routeId) ??
-            readText(lane?.busLocalBlID) ??
-            readText(lane?.busID)
-          : undefined;
-      const lineId =
-        mode === 'subway'
-          ? readText(lane?.subwayCode) ?? readText(lane?.subwayID) ?? readText(lane?.subwayId)
-          : mode === 'bus'
-            ? busRouteIdResolved ?? readText(lane?.busID)
-            : undefined;
-      const startStationId = readText(segment.startID) ?? readText(segment.stationID);
-      const endStationId = readText(segment.endID) ?? readText(segment.stationID2);
-
-      const pathPoints = [
-        Number.isFinite(Number(segment.startY)) && Number.isFinite(Number(segment.startX))
-          ? { lat: Number(segment.startY), lng: Number(segment.startX) }
-          : null,
-        ...stopPoints,
-        Number.isFinite(Number(segment.endY)) && Number.isFinite(Number(segment.endX))
-          ? { lat: Number(segment.endY), lng: Number(segment.endX) }
-          : null,
-      ].filter(Boolean) as Array<{ lat: number; lng: number; label?: string }>;
-      const routeGeometry =
-        pathPoints.length >= 2
-          ? pathPoints.map((point) => ({
-              lat: point.lat,
-              lng: point.lng,
-            }))
-          : undefined;
-
-      return {
-        mode,
-        durationMinutes: Math.max(1, durationMinutes),
-        lineLabel:
-          mode === 'subway'
-            ? segment.lane?.[0]?.name ?? '지하철'
-            : mode === 'bus'
-              ? segment.lane?.[0]?.busNo ?? segment.lane?.[0]?.name ?? '버스'
-              : undefined,
-        lineId,
-        startName: segment.startName,
-        endName: segment.endName,
-        startStationId: startStationId ?? undefined,
-        endStationId: endStationId ?? undefined,
-        busRouteId: mode === 'bus' ? busRouteIdResolved : undefined,
-        startLat: segment.startY,
-        startLng: segment.startX,
-        endLat: segment.endY,
-        endLng: segment.endX,
-        pathPoints,
-        routeGeometry,
-        passStops: stopPoints.map((point) => point.label?.trim()).filter(Boolean) as string[],
-        distanceMeters: Number(segment.distance ?? 0),
-      } satisfies MobilitySegmentPayload;
-    });
-  const segments = mappedSegments.filter((segment): segment is MobilitySegmentPayload => segment !== null);
-  segments.forEach((segment, segmentIndex) => {
-    const routeGeometryLen = segment.routeGeometry?.length ?? 0;
-    const pathPointsLen = segment.pathPoints?.length ?? 0;
-    console.log('[RouteGeometry][ODSAY_CLIENT_SEGMENT]', {
-      routeId: `odsay-client-${index + 1}`,
-      segmentIndex,
-      mode: segment.mode,
-      lineLabel: segment.lineLabel ?? null,
-      startName: segment.startName ?? null,
-      endName: segment.endName ?? null,
-      busRouteId: segment.busRouteId ?? null,
-      routeGeometryLen,
-      pathPointsLen,
-    });
-    if (routeGeometryLen <= 2) {
-      console.warn('[RouteGeometry][ODSAY_CLIENT_SEGMENT][INSUFFICIENT_ROUTE_GEOMETRY]', {
-        routeId: `odsay-client-${index + 1}`,
-        segmentIndex,
-        mode: segment.mode,
-        lineLabel: segment.lineLabel ?? null,
-        startName: segment.startName ?? null,
-        endName: segment.endName ?? null,
-        busRouteId: segment.busRouteId ?? null,
-        routeGeometryLen,
-        pathPointsLen,
-      });
-    }
-  });
-
-  const transitCount = segments.filter((segment) => segment.mode === 'bus' || segment.mode === 'subway').length;
-  if (segments.length === 0 || transitCount === 0) {
-    return null;
-  }
-
-  const walkingMinutes = segments
-    .filter((segment) => segment.mode === 'walk')
-    .reduce((sum, segment) => sum + segment.durationMinutes, 0);
-  const estimatedTravelMinutes = Number(path.info?.totalTime ?? 0) || segments.reduce((sum, segment) => sum + segment.durationMinutes, 0);
-  const transferCount = Math.max(0, transitCount - 1);
-
-  return {
-    id: `odsay-client-${index + 1}`,
-    name: `대중교통 추천 ${index + 1}`,
-    source: 'api',
-    estimatedTravelMinutes: Math.max(3, estimatedTravelMinutes),
-    realtimeAdjustedDurationMinutes: Math.max(3, estimatedTravelMinutes),
-    delayRisk: Math.max(0.05, Math.min(0.95, 0.14 + transferCount * 0.05)),
-    transferCount,
-    walkingMinutes,
-    mobilitySegments: segments,
-  };
-}
-
-export async function startTripTracking(input: TripStartRequest): Promise<TripStartResult> {
-  const response = await fetch(`${API_BASE_URL}/trips/start`, {
+  const response = await authorizedFetch(`${API_BASE_URL}/trips/start`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify(input),
   });
   if (!response.ok) {
@@ -1167,11 +793,21 @@ export async function startTripTracking(input: TripStartRequest): Promise<TripSt
   return readApiEnvelope<TripStartResult>(response);
 }
 
+export async function getTripTracking(tripId: string): Promise<TripSnapshotResult> {
+  const response = await authorizedFetch(`${API_BASE_URL}/trips/${encodeURIComponent(tripId)}`, {
+    method: 'GET',
+  });
+  if (!response.ok) {
+    throw new Error(`Get trip failed: ${response.status}`);
+  }
+  return readApiEnvelope<TripSnapshotResult>(response);
+}
+
 export async function sendTripPosition(
   tripId: string,
   input: TripPositionRequest,
 ): Promise<TripPositionResult> {
-  const response = await fetch(`${API_BASE_URL}/trips/${encodeURIComponent(tripId)}/position`, {
+  const response = await authorizedFetch(`${API_BASE_URL}/trips/${encodeURIComponent(tripId)}/position`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

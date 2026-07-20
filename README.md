@@ -44,7 +44,9 @@ git push -u origin main
 - `DATABASE_URL`
 - `JWT_ACCESS_SECRET` (최소 32자)
 - `JWT_REFRESH_SECRET` (최소 32자)
-- `KAKAO_API_KEY`
+- `KAKAO_REST_API_KEY`
+- `ODSAY_API_KEY`
+- `SEOUL_BUS_KEY`
 - `FCM_SERVER_KEY`
 - `CORS_ORIGINS` (운영에서 whitelist)
 - `RATE_LIMIT_TTL_MS` (기본 60000)
@@ -52,6 +54,11 @@ git push -u origin main
 
 ### MOBILE (`apps/mobile/.env`)
 - `EXPO_PUBLIC_API_URL`
+- `EXPO_PUBLIC_KAKAO_JS_KEY`
+- `EXPO_PUBLIC_KAKAO_WEBVIEW_BASE_URL`
+- `EXPO_PUBLIC_ENABLE_DEMO_MOCKS` (개발용, 운영에서는 강제 비활성)
+
+외부 데이터 경계와 fallback 정책은 `docs/architecture/external-data-boundaries.md`를 기준으로 관리합니다.
 
 ## 보안 가이드
 - `.env`는 절대 커밋하지 않습니다.

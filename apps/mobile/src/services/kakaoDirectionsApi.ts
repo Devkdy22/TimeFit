@@ -1,7 +1,5 @@
-import { parseKakaoVertexes } from './routeGeometry/geometryUtils';
 import { LatLng } from './routeGeometry/types';
-
-const KAKAO_REST_API_KEY = process.env.EXPO_PUBLIC_KAKAO_REST_API_KEY ?? '';
+import { fetchKakaoWalkGeometry } from './api/client';
 
 interface KakaoDirectionsOptions {
   origin: LatLng;
@@ -9,58 +7,14 @@ interface KakaoDirectionsOptions {
   priority?: 'RECOMMEND' | 'TIME' | 'DISTANCE';
 }
 
-interface KakaoDirectionsRoad {
-  vertexes?: number[];
-}
-
-interface KakaoDirectionsSection {
-  roads?: KakaoDirectionsRoad[];
-}
-
-interface KakaoDirectionsResponse {
-  routes?: Array<{
-    sections?: KakaoDirectionsSection[];
-  }>;
-}
-
 /**
- * Kakao Mobility Directions API 호출
- * 도보 경로: priority=RECOMMEND, 자동차 경로 기반이지만 vertexes 품질은 충분
- * 실제 도보 API가 있다면 endpoint를 교체한다.
+ * TimeFit backend proxy를 통해 Kakao Mobility Directions geometry를 조회한다.
  */
 export async function fetchKakaoDirectionsGeometry(options: KakaoDirectionsOptions): Promise<LatLng[]> {
-  const { origin, destination, priority = 'RECOMMEND' } = options;
-
-  if (!KAKAO_REST_API_KEY) {
-    throw new Error('EXPO_PUBLIC_KAKAO_REST_API_KEY is missing');
-  }
-
-  const url =
-    `https://apis-navi.kakaomobility.com/v1/directions` +
-    `?origin=${origin.longitude},${origin.latitude}` +
-    `&destination=${destination.longitude},${destination.latitude}` +
-    `&priority=${priority}`;
-
-  const response = await fetch(url, {
-    headers: {
-      Authorization: `KakaoAK ${KAKAO_REST_API_KEY}`,
-    },
+  const { origin, destination } = options;
+  const points = await fetchKakaoWalkGeometry({
+    origin: { name: 'origin', lat: origin.latitude, lng: origin.longitude },
+    destination: { name: 'destination', lat: destination.latitude, lng: destination.longitude },
   });
-
-  if (!response.ok) {
-    throw new Error(`Kakao Directions API error: ${response.status}`);
-  }
-
-  const data = (await response.json()) as KakaoDirectionsResponse;
-
-  const coords: LatLng[] = [];
-  const sections = data.routes?.[0]?.sections ?? [];
-  for (const section of sections) {
-    for (const road of section.roads ?? []) {
-      const parsed = parseKakaoVertexes(road.vertexes ?? []);
-      coords.push(...parsed);
-    }
-  }
-
-  return coords;
+  return points.map((point) => ({ latitude: point.lat, longitude: point.lng }));
 }
