@@ -1,8 +1,37 @@
 import React from 'react';
 import TestRenderer, { act } from 'react-test-renderer';
+
+let mockEventSourceCtor: (new (url: string, init?: { headers?: Record<string, string>; pollingInterval?: number }) => unknown) | null = null;
+
+jest.mock('react-native-sse', () => ({
+  __esModule: true,
+  default: function EventSourceMock(
+    this: unknown,
+    url: string,
+    init?: { headers?: Record<string, string>; pollingInterval?: number },
+  ) {
+    if (!mockEventSourceCtor) {
+      throw new Error('MockEventSource constructor is not configured');
+    }
+    return new mockEventSourceCtor(url, init);
+  },
+}));
+
+jest.mock('@react-native-async-storage/async-storage', () => ({
+  __esModule: true,
+  default: {
+    getItem: jest.fn(),
+    setItem: jest.fn(),
+    removeItem: jest.fn(),
+    multiRemove: jest.fn(),
+    multiSet: jest.fn(),
+  },
+}));
+
 import { useTripTracking } from '../useTripTracking';
 import {
   fetchRouteCandidates,
+  getCurrentAccessTokenForTransport,
   sendTripPosition,
   startTripTracking,
   type MobilityRoutePayload,
@@ -10,6 +39,7 @@ import {
 
 jest.mock('../../services/api/client', () => ({
   fetchRouteCandidates: jest.fn(),
+  getCurrentAccessTokenForTransport: jest.fn(),
   sendTripPosition: jest.fn(),
   startTripTracking: jest.fn(),
 }));
@@ -27,11 +57,17 @@ class MockEventSource {
   static instances: MockEventSource[] = [];
 
   public readonly url: string;
+  public readonly init?: { headers?: Record<string, string>; pollingInterval?: number };
   public onerror: (() => void) | null = null;
+  public close = jest.fn();
+  public removeAllEventListeners = jest.fn(() => {
+    this.listeners.clear();
+  });
   private readonly listeners = new Map<string, Listener[]>();
 
-  constructor(url: string) {
+  constructor(url: string, init?: { headers?: Record<string, string>; pollingInterval?: number }) {
     this.url = url;
+    this.init = init;
     MockEventSource.instances.push(this);
   }
 
@@ -40,8 +76,6 @@ class MockEventSource {
     existing.push(listener);
     this.listeners.set(type, existing);
   }
-
-  close() {}
 
   emit(type: string, payload: unknown, lastEventId?: string) {
     const listeners = this.listeners.get(type) ?? [];
@@ -53,9 +87,23 @@ class MockEventSource {
       listener(event);
     }
   }
+
+  emitError(xhrStatus: number) {
+    const listeners = this.listeners.get('error') ?? [];
+    const event = {
+      type: 'error',
+      message: '',
+      xhrState: 4,
+      xhrStatus,
+    } as unknown as MessageEvent;
+    for (const listener of listeners) {
+      listener(event);
+    }
+  }
 }
 
 const mockedFetchRouteCandidates = jest.mocked(fetchRouteCandidates);
+const mockedGetCurrentAccessTokenForTransport = jest.mocked(getCurrentAccessTokenForTransport);
 const mockedStartTripTracking = jest.mocked(startTripTracking);
 const mockedSendTripPosition = jest.mocked(sendTripPosition);
 
@@ -84,9 +132,12 @@ describe('useTripTracking failure-case verification', () => {
   beforeEach(() => {
     jest.useFakeTimers();
     MockEventSource.instances = [];
+    mockEventSourceCtor = MockEventSource;
     (globalThis as unknown as { EventSource?: typeof MockEventSource }).EventSource = MockEventSource;
+    mockedGetCurrentAccessTokenForTransport.mockReturnValue('access-token');
     mockedFetchRouteCandidates.mockResolvedValue({
       source: 'api',
+      status: 'OK',
       fetchedAt: '2026-05-27T00:00:00.000Z',
       cacheableForMs: 60_000,
       candidates: [route],
@@ -109,6 +160,7 @@ describe('useTripTracking failure-case verification', () => {
   });
 
   afterEach(() => {
+    mockEventSourceCtor = null;
     jest.useRealTimers();
   });
 
@@ -146,10 +198,17 @@ describe('useTripTracking failure-case verification', () => {
     });
 
     expect(mockedStartTripTracking).toHaveBeenCalledTimes(1);
+    expect(mockedStartTripTracking.mock.calls[0]?.[1]?.idempotencyKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
     expect(MockEventSource.instances).toHaveLength(1);
+    expect(MockEventSource.instances[0].init?.headers?.Authorization).toBe('Bearer access-token');
+    expect(MockEventSource.instances[0].init?.pollingInterval).toBe(0);
     await act(async () => {
       renderer!.unmount();
     });
+    expect(MockEventSource.instances[0].removeAllEventListeners).toHaveBeenCalledTimes(1);
+    expect(MockEventSource.instances[0].close).toHaveBeenCalledTimes(1);
   });
 
   it('SSE error -> reconnect', async () => {
@@ -190,6 +249,80 @@ describe('useTripTracking failure-case verification', () => {
     });
 
     expect(MockEventSource.instances).toHaveLength(2);
+    expect(MockEventSource.instances[1].init?.headers?.Authorization).toBe('Bearer access-token');
+    await act(async () => {
+      renderer!.unmount();
+    });
+  });
+
+  it('SSE reconnect reads the latest access token', async () => {
+    mockedGetCurrentAccessTokenForTransport.mockReturnValueOnce('access-token-1').mockReturnValue('access-token-2');
+    const getCurrentPosition = jest.fn().mockResolvedValue({ lat: 37.5, lng: 127.0 });
+    const stateRef: { current: ReturnType<typeof useTripTracking> | null } = { current: null };
+
+    function Harness() {
+      stateRef.current = useTripTracking({
+        origin: { name: '출발', lat: 37.5, lng: 127.0 },
+        destination: { name: '도착', lat: 37.6, lng: 127.1 },
+        targetArrivalTime: '2026-05-27T09:00:00.000Z',
+        getCurrentPosition,
+      });
+      return null;
+    }
+
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(<Harness />, { unstable_isConcurrent: false } as never);
+      await flushMicrotask();
+    });
+    await act(async () => {
+      await stateRef.current!.start();
+      await flushMicrotask();
+      MockEventSource.instances[0].emit('open', {});
+      MockEventSource.instances[0].onerror?.();
+      jest.advanceTimersByTime(2_000);
+      await flushMicrotask();
+    });
+
+    expect(MockEventSource.instances).toHaveLength(2);
+    expect(MockEventSource.instances[0].init?.headers?.Authorization).toBe('Bearer access-token-1');
+    expect(MockEventSource.instances[1].init?.headers?.Authorization).toBe('Bearer access-token-2');
+    await act(async () => {
+      renderer!.unmount();
+    });
+  });
+
+  it('SSE 401/403 errors do not reconnect', async () => {
+    const getCurrentPosition = jest.fn().mockResolvedValue({ lat: 37.5, lng: 127.0 });
+    const stateRef: { current: ReturnType<typeof useTripTracking> | null } = { current: null };
+
+    function Harness() {
+      stateRef.current = useTripTracking({
+        origin: { name: '출발', lat: 37.5, lng: 127.0 },
+        destination: { name: '도착', lat: 37.6, lng: 127.1 },
+        targetArrivalTime: '2026-05-27T09:00:00.000Z',
+        getCurrentPosition,
+      });
+      return null;
+    }
+
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(<Harness />, { unstable_isConcurrent: false } as never);
+      await flushMicrotask();
+    });
+    await act(async () => {
+      await stateRef.current!.start();
+      await flushMicrotask();
+      MockEventSource.instances[0].emit('open', {});
+      MockEventSource.instances[0].emitError(401);
+      jest.advanceTimersByTime(10_000);
+      await flushMicrotask();
+    });
+
+    expect(MockEventSource.instances).toHaveLength(1);
+    expect(stateRef.current?.isRunning).toBe(false);
+    expect(stateRef.current?.error).toBe('auth_required');
     await act(async () => {
       renderer!.unmount();
     });
