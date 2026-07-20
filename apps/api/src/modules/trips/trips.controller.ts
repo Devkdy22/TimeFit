@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Body,
   UseGuards,
   Controller,
@@ -8,17 +9,21 @@ import {
   Param,
   Post,
   Query,
+  Req,
   Sse,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { ApiResponse } from '../../common/http/api-response';
 import { type AppEventEnvelope, EventBus } from '../../core/EventBus';
+import { AuthAccessGuard, type AuthenticatedRequest } from '../auth/auth-access.guard';
 import { RouteCandidatesDto } from './dto/route-candidates.dto';
 import { StartTripDto } from './dto/start-trip.dto';
 import { StopTripDto } from './dto/stop-trip.dto';
 import { TripPositionDto } from './dto/trip-position.dto';
 import { TripPositionRateLimitGuard } from './guards/trip-position-rate-limit.guard';
 import { TripLifecycleManager } from './services/TripLifecycleManager';
+import { TripIdempotencyStore } from './services/trip-idempotency.store';
 import { TripsService } from './services/trips.service';
 
 @Controller()
@@ -27,6 +32,7 @@ export class TripsController {
     private readonly tripsService: TripsService,
     private readonly eventBus: EventBus,
     private readonly tripLifecycleManager: TripLifecycleManager,
+    private readonly idempotencyStore: TripIdempotencyStore,
   ) {}
 
   @Post('routes')
@@ -36,32 +42,75 @@ export class TripsController {
   }
 
   @Post('trips/start')
-  start(@Body() body: StartTripDto) {
-    return ApiResponse.ok(this.tripsService.startTrip(body));
+  @UseGuards(AuthAccessGuard)
+  async start(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: StartTripDto,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ) {
+    const authUserId = this.requireAuthUserId(request);
+    const normalizedKey = this.validateIdempotencyKey(idempotencyKey);
+    if (!normalizedKey) {
+      return ApiResponse.ok(this.tripsService.startTrip(body, authUserId));
+    }
+
+    const idempotencyInput = {
+      userId: authUserId,
+      scope: 'trip:start',
+      key: normalizedKey,
+      payload: body,
+    };
+
+    const existing = await this.idempotencyStore.begin<ReturnType<typeof ApiResponse.ok>>(idempotencyInput);
+    if (existing.replayed && existing.response) {
+      return existing.response;
+    }
+
+    try {
+      const started = this.tripsService.startTrip(body, authUserId);
+      const response = ApiResponse.ok(started);
+      await this.idempotencyStore.complete(idempotencyInput, response);
+      return response;
+    } catch (error) {
+      await this.idempotencyStore.clearPending(idempotencyInput);
+      throw error;
+    }
   }
 
   @Post('trips/:id/position')
-  @UseGuards(TripPositionRateLimitGuard)
-  updatePosition(@Param('id') tripId: string, @Body() body: TripPositionDto) {
-    return ApiResponse.ok(this.tripsService.updatePosition(tripId, body));
+  @UseGuards(AuthAccessGuard, TripPositionRateLimitGuard)
+  updatePosition(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') tripId: string,
+    @Body() body: TripPositionDto,
+  ) {
+    return ApiResponse.ok(
+      this.tripsService.updatePosition(tripId, body, this.requireAuthUserId(request)),
+    );
   }
 
   @Post('trips/stop')
-  stop(@Body() body: StopTripDto) {
-    return ApiResponse.ok(this.tripsService.stopTrip(body.tripId));
+  @UseGuards(AuthAccessGuard)
+  stop(@Req() request: AuthenticatedRequest, @Body() body: StopTripDto) {
+    return ApiResponse.ok(this.tripsService.stopTrip(body.tripId, this.requireAuthUserId(request)));
   }
 
   @Get('trips/:id')
-  getTrip(@Param('id') tripId: string) {
-    return ApiResponse.ok(this.tripsService.getTrip(tripId));
+  @UseGuards(AuthAccessGuard)
+  getTrip(@Req() request: AuthenticatedRequest, @Param('id') tripId: string) {
+    return ApiResponse.ok(this.tripsService.getTrip(tripId, this.requireAuthUserId(request)));
   }
 
   @Sse('trips/:id/events')
+  @UseGuards(AuthAccessGuard)
   events(
+    @Req() request: AuthenticatedRequest,
     @Param('id') tripId: string,
     @Headers('last-event-id') lastEventId?: string,
     @Query('lastEventId') lastEventIdQuery?: string,
   ): Observable<MessageEvent> {
+    this.tripsService.assertCanSubscribeToTrip(this.requireAuthUserId(request), tripId);
+
     return new Observable<MessageEvent>((subscriber) => {
       try {
         this.tripLifecycleManager.onSseConnected(tripId);
@@ -245,5 +294,29 @@ export class TripsController {
     }
 
     return null;
+  }
+
+  private requireAuthUserId(request: AuthenticatedRequest): string {
+    if (!request.authUserId) {
+      throw new UnauthorizedException('Missing authenticated user');
+    }
+    return request.authUserId;
+  }
+
+  private validateIdempotencyKey(key: string | undefined): string | null {
+    if (!key?.trim()) {
+      return null;
+    }
+
+    const normalized = key.trim();
+    const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    if (!uuidPattern.test(normalized)) {
+      throw new BadRequestException({
+        code: 'IDEMPOTENCY_KEY_INVALID',
+        message: 'Idempotency-Key must be a valid UUID',
+      });
+    }
+
+    return normalized;
   }
 }

@@ -1,5 +1,7 @@
 import { Module } from '@nestjs/common';
+import { PostgresIdempotencyStore } from '../../common/idempotency/postgres-idempotency.store';
 import { SafeLogger } from '../../common/logger/safe-logger.service';
+import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RecommendationModule } from '../recommendation/recommendation.module';
 import { TripsController } from './trips.controller';
@@ -9,15 +11,18 @@ import { MovementTracker } from './services/tracking/MovementTracker';
 import { OffRouteHandler } from './services/tracking/OffRouteHandler';
 import { PositionSmoother } from './services/tracking/PositionSmoother';
 import { TripLifecycleManager } from './services/TripLifecycleManager';
+import { TripIdempotencyStore } from './services/trip-idempotency.store';
 import { TripsService } from './services/trips.service';
 import { TripPositionRateLimitGuard } from './guards/trip-position-rate-limit.guard';
 
 @Module({
-  imports: [NotificationsModule, RecommendationModule],
+  imports: [AuthModule, NotificationsModule, RecommendationModule],
   controllers: [TripsController],
   providers: [
     TripsRepository,
     TripsService,
+    PostgresIdempotencyStore,
+    TripIdempotencyStore,
     SafeLogger,
     MovementTracker,
     PositionSmoother,

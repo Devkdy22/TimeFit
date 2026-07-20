@@ -1,4 +1,9 @@
-import { Injectable, OnModuleDestroy } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { SafeLogger } from '../../../common/logger/safe-logger.service';
 import {
   type AppEventEnvelope,
@@ -105,7 +110,7 @@ export class TripsService implements OnModuleDestroy {
     return this.kakaoMapClient.getRouteCandidates(origin, destination);
   }
 
-  startTrip(input: StartTripDto): {
+  startTrip(input: StartTripDto, authenticatedUserId?: string): {
     tripId: string;
     routeId: string;
     status: '여유' | '주의' | '긴급';
@@ -122,7 +127,7 @@ export class TripsService implements OnModuleDestroy {
     const status = computeTimeFitStatus(route, targetArrivalTime);
 
     const trip = this.tripsRepository.create({
-      userId: input.userId ?? 'anonymous',
+      userId: authenticatedUserId ?? input.userId ?? 'anonymous',
       recommendationId: input.recommendationId ?? route.id,
       startedAt,
       currentRoute: route.id,
@@ -175,7 +180,7 @@ export class TripsService implements OnModuleDestroy {
     };
   }
 
-  updatePosition(tripId: string, input: TripPositionDto): {
+  updatePosition(tripId: string, input: TripPositionDto, authenticatedUserId?: string): {
     currentSegmentIndex: number;
     progress: number;
     isOffRoute: boolean;
@@ -185,7 +190,9 @@ export class TripsService implements OnModuleDestroy {
     ignored?: boolean;
     reason?: string;
   } {
-    const active = this.activeTripById.get(tripId);
+    const active = authenticatedUserId
+      ? this.getOwnedActiveTrip(authenticatedUserId, tripId)
+      : this.activeTripById.get(tripId);
     if (!active) {
       throw new Error('trip_not_tracking');
     }
@@ -276,7 +283,11 @@ export class TripsService implements OnModuleDestroy {
     return movement;
   }
 
-  stopTrip(tripId: string): { stopped: boolean; tripId: string } {
+  stopTrip(tripId: string, authenticatedUserId?: string): { stopped: boolean; tripId: string } {
+    if (authenticatedUserId) {
+      this.assertTripOwner(authenticatedUserId, tripId);
+    }
+
     const active = this.activeTripById.get(tripId);
     if (!active) {
       return { stopped: false, tripId };
@@ -297,7 +308,7 @@ export class TripsService implements OnModuleDestroy {
     };
   }
 
-  getTrip(tripId: string): {
+  getTrip(tripId: string, authenticatedUserId?: string): {
     trip: TripEntity;
     route: MobilityRoute | null;
     status: '여유' | '주의' | '긴급' | null;
@@ -305,7 +316,9 @@ export class TripsService implements OnModuleDestroy {
     nextAction: NextActionResult | null;
     movement: MovementTrackingResult | null;
   } {
-    const trip = this.tripsRepository.findById(tripId);
+    const trip = authenticatedUserId
+      ? this.assertTripOwner(authenticatedUserId, tripId)
+      : this.tripsRepository.findById(tripId);
     const active = this.activeTripById.get(tripId);
 
     return {
@@ -379,6 +392,10 @@ export class TripsService implements OnModuleDestroy {
       },
       limit: 200,
     });
+  }
+
+  assertCanSubscribeToTrip(authenticatedUserId: string, tripId: string): void {
+    this.getOwnedActiveTrip(authenticatedUserId, tripId);
   }
 
   markSseConnected(tripId: string): void {
@@ -477,6 +494,29 @@ export class TripsService implements OnModuleDestroy {
     this.metricsCollector.track(route, {
       offRoute: movement.isOffRoute,
     });
+  }
+
+  private assertTripOwner(authenticatedUserId: string, tripId: string): TripEntity {
+    const trip = this.tripsRepository.findById(tripId);
+    if (trip.userId !== authenticatedUserId) {
+      throw new ForbiddenException({
+        code: 'TRIP_FORBIDDEN',
+        message: 'Trip is not accessible by the authenticated user',
+      });
+    }
+    return trip;
+  }
+
+  private getOwnedActiveTrip(authenticatedUserId: string, tripId: string): ActiveTripState {
+    const trip = this.assertTripOwner(authenticatedUserId, tripId);
+    const active = this.activeTripById.get(tripId);
+    if (!active || trip.status === 'arrived') {
+      throw new BadRequestException({
+        code: 'TRIP_NOT_TRACKING',
+        message: 'Trip is not actively tracking',
+      });
+    }
+    return active;
   }
 
   private async handleRouteEvent(
