@@ -287,6 +287,7 @@ function createAuthDb() {
 }
 
 function createService(db = createAuthDb(), options: { stubSocialProfile?: boolean } = {}) {
+  const logger = { log: jest.fn() };
   const config = {
     googleClientId: 'google-client',
     googleClientSecret: 'google-secret',
@@ -297,7 +298,7 @@ function createService(db = createAuthDb(), options: { stubSocialProfile?: boole
     publicApiBaseUrl: 'https://api.example.com',
     oauthReturnToAllowlist: 'timefit://auth',
   };
-  const service = new AuthService({} as never, config as never);
+  const service = new AuthService(logger as never, config as never);
   (
     jest.spyOn(
       service as unknown as { getPrismaClient: () => Promise<unknown> },
@@ -317,7 +318,7 @@ function createService(db = createAuthDb(), options: { stubSocialProfile?: boole
         name: 'User',
       });
   }
-  return { service, db };
+  return { service, db, logger };
 }
 
 describe('AuthService persistence', () => {
@@ -430,6 +431,30 @@ describe('AuthService persistence', () => {
     expect(db.oauthStates.size).toBe(1);
     expect([...db.oauthStates.values()][0]?.provider).toBe('kakao');
     expect([...db.oauthStates.values()][0]?.returnTo).toBe('timefit://auth');
+  });
+
+  it('starts Naver OAuth with the backend HTTPS callback and safe diagnostics', async () => {
+    const { service, db, logger } = createService();
+
+    const redirectUrl = await service.startOAuth('naver', 'timefit://auth');
+    const parsed = new URL(redirectUrl);
+
+    expect(parsed.origin + parsed.pathname).toBe('https://nid.naver.com/oauth2.0/authorize');
+    expect(parsed.searchParams.get('client_id')).toBe('naver-client');
+    expect(parsed.searchParams.get('redirect_uri')).toBe('https://api.example.com/auth/naver/callback');
+    expect(parsed.searchParams.get('response_type')).toBe('code');
+    expect(parsed.searchParams.get('state')).toBeTruthy();
+    expect(db.oauthStates.size).toBe(1);
+    expect([...db.oauthStates.values()][0]?.provider).toBe('naver');
+    expect([...db.oauthStates.values()][0]?.returnTo).toBe('timefit://auth');
+    expect(logger.log).toHaveBeenCalledWith(
+      {
+        event: 'naver.oauth.start_authorize_url_created',
+        redirectUri: 'https://api.example.com/auth/naver/callback',
+        returnTo: 'timefit://auth',
+      },
+      'AuthService',
+    );
   });
 
   it('rejects OAuth start with an unlisted returnTo', async () => {

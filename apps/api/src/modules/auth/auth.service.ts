@@ -179,6 +179,11 @@ export class AuthService {
       redirectUri,
       returnTo,
     });
+    this.logNaverOAuthEvent(provider, {
+      event: 'naver.oauth.start_authorize_url_created',
+      redirectUri,
+      returnTo,
+    });
     const prisma = await this.getPrismaClient();
     await prisma.oAuthState.create({
       data: {
@@ -200,9 +205,19 @@ export class AuthService {
       hasState: Boolean(input.state),
       hasProviderError: Boolean(input.error),
     });
+    this.logNaverOAuthEvent(provider, {
+      event: 'naver.oauth.callback_received',
+      hasCode: Boolean(input.code),
+      hasState: Boolean(input.state),
+      hasProviderError: Boolean(input.error),
+    });
     if (input.error) {
       this.logKakaoOAuthEvent(provider, {
         event: 'kakao.oauth.callback_provider_error',
+        redirectTo: 'timefit://auth',
+      });
+      this.logNaverOAuthEvent(provider, {
+        event: 'naver.oauth.callback_provider_error',
         redirectTo: 'timefit://auth',
       });
       return this.oauthFailureReturnTo('timefit://auth', provider, 'provider_error');
@@ -210,6 +225,10 @@ export class AuthService {
     if (!input.code || !input.state) {
       this.logKakaoOAuthEvent(provider, {
         event: 'kakao.oauth.callback_missing_code_or_state',
+        redirectTo: 'timefit://auth',
+      });
+      this.logNaverOAuthEvent(provider, {
+        event: 'naver.oauth.callback_missing_code_or_state',
         redirectTo: 'timefit://auth',
       });
       return this.oauthFailureReturnTo('timefit://auth', provider, 'missing_code_or_state');
@@ -221,6 +240,11 @@ export class AuthService {
       returnTo = state.returnTo;
       this.logKakaoOAuthEvent(provider, {
         event: 'kakao.oauth.callback_state_consumed',
+        returnTo,
+        tokenRedirectUri: this.providerCallbackUrl(provider),
+      });
+      this.logNaverOAuthEvent(provider, {
+        event: 'naver.oauth.callback_state_consumed',
         returnTo,
         tokenRedirectUri: this.providerCallbackUrl(provider),
       });
@@ -239,10 +263,21 @@ export class AuthService {
         hasTicket: true,
         hasState: true,
       });
+      this.logNaverOAuthEvent(provider, {
+        event: 'naver.oauth.callback_app_redirect_created',
+        redirectBase: returnTo,
+        hasTicket: true,
+        hasState: true,
+      });
       return appRedirectUrl;
     } catch (error) {
       this.logKakaoOAuthEvent(provider, {
         event: 'kakao.oauth.callback_failed',
+        returnTo,
+        reason: error instanceof Error ? error.message : 'unknown',
+      });
+      this.logNaverOAuthEvent(provider, {
+        event: 'naver.oauth.callback_failed',
         returnTo,
         reason: error instanceof Error ? error.message : 'unknown',
       });
@@ -755,6 +790,14 @@ export class AuthService {
 
   private logKakaoOAuthEvent(provider: Provider, payload: Record<string, unknown>) {
     if (provider !== 'kakao') {
+      return;
+    }
+    const logger = this.logger as { log?: (message: unknown, context?: string) => void };
+    logger.log?.(payload, AuthService.name);
+  }
+
+  private logNaverOAuthEvent(provider: Provider, payload: Record<string, unknown>) {
+    if (provider !== 'naver') {
       return;
     }
     const logger = this.logger as { log?: (message: unknown, context?: string) => void };
