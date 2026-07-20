@@ -46,6 +46,7 @@ import { RealtimeBusModule } from '../realtime-bus/realtime-bus.module';
   exports: [
     RecommendationService,
     KakaoMapClient,
+    SeoulBusClient,
     ReRoutingEngine,
     RealtimeUpdateScheduler,
     TimeFitNotifier,

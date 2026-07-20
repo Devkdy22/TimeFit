@@ -1,5 +1,6 @@
 import { BadRequestException, Controller, Get, Query } from '@nestjs/common';
 import { ApiResponse } from '../../common/http/api-response';
+import { SeoulBusClient } from '../recommendation/integrations/seoul-bus.client';
 import { KakaoLocalService } from './kakao-local.service';
 import { LocationService, type NearbyPoiResponse } from './location.service';
 
@@ -8,6 +9,7 @@ export class KakaoLocalController {
   constructor(
     private readonly kakaoLocalService: KakaoLocalService,
     private readonly locationService: LocationService,
+    private readonly seoulBusClient: SeoulBusClient,
   ) {}
 
   @Get('search/keyword')
@@ -86,5 +88,83 @@ export class KakaoLocalController {
 
     const data = await this.locationService.getNearbyPoi(lat, lng, radius, selectedName);
     return ApiResponse.ok(data);
+  }
+
+  @Get('directions/walk')
+  async walkDirections(
+    @Query('originLat') originLatText: string,
+    @Query('originLng') originLngText: string,
+    @Query('destinationLat') destinationLatText: string,
+    @Query('destinationLng') destinationLngText: string,
+  ) {
+    const originLat = Number(originLatText);
+    const originLng = Number(originLngText);
+    const destinationLat = Number(destinationLatText);
+    const destinationLng = Number(destinationLngText);
+    if (
+      !Number.isFinite(originLat) ||
+      !Number.isFinite(originLng) ||
+      !Number.isFinite(destinationLat) ||
+      !Number.isFinite(destinationLng)
+    ) {
+      throw new BadRequestException('origin and destination coordinates must be valid numbers');
+    }
+
+    const data = await this.kakaoLocalService.getWalkDirectionsGeometry(
+      { lat: originLat, lng: originLng },
+      { lat: destinationLat, lng: destinationLng },
+    );
+    return ApiResponse.ok(data);
+  }
+
+  @Get('bus/routes')
+  async busRouteIds(@Query('routeNo') routeNo: string) {
+    const normalized = routeNo?.trim();
+    if (!normalized) {
+      throw new BadRequestException('routeNo is required');
+    }
+    const routeIds = await this.seoulBusClient.findRouteIdsByRouteNo(normalized);
+    return ApiResponse.ok({
+      source: 'api',
+      provider: 'seoul-bus',
+      isFallback: false,
+      fallbackReason: null,
+      fetchedAt: new Date().toISOString(),
+      routeIds,
+    });
+  }
+
+  @Get('bus/route-path')
+  async busRoutePath(@Query('busRouteId') busRouteId: string) {
+    const normalized = busRouteId?.trim();
+    if (!normalized) {
+      throw new BadRequestException('busRouteId is required');
+    }
+    const points = await this.seoulBusClient.getRoutePathGeometry(normalized);
+    return ApiResponse.ok({
+      source: 'api',
+      provider: 'seoul-bus',
+      isFallback: false,
+      fallbackReason: null,
+      fetchedAt: new Date().toISOString(),
+      points,
+    });
+  }
+
+  @Get('bus/stations')
+  async busStations(@Query('busRouteId') busRouteId: string) {
+    const normalized = busRouteId?.trim();
+    if (!normalized) {
+      throw new BadRequestException('busRouteId is required');
+    }
+    const stations = await this.seoulBusClient.getRouteStations(normalized);
+    return ApiResponse.ok({
+      source: 'api',
+      provider: 'seoul-bus',
+      isFallback: false,
+      fallbackReason: null,
+      fetchedAt: new Date().toISOString(),
+      stations,
+    });
   }
 }

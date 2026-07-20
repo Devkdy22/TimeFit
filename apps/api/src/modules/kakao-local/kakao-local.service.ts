@@ -40,6 +40,16 @@ interface KakaoCategorySearchResponse {
   documents?: KakaoCategoryDocument[];
 }
 
+interface KakaoDirectionsResponse {
+  routes?: Array<{
+    sections?: Array<{
+      roads?: Array<{
+        vertexes?: number[];
+      }>;
+    }>;
+  }>;
+}
+
 @Injectable()
 export class KakaoLocalService {
   constructor(
@@ -234,5 +244,57 @@ export class KakaoLocalService {
       distance: best && Number.isFinite(best.distance) ? best.distance : null,
     };
   }
-}
 
+  async getWalkDirectionsGeometry(origin: { lat: number; lng: number }, destination: { lat: number; lng: number }) {
+    const restApiKey = this.getRestApiKey();
+    const params = new URLSearchParams({
+      origin: `${origin.lng},${origin.lat}`,
+      destination: `${destination.lng},${destination.lat}`,
+      priority: 'RECOMMEND',
+      alternatives: 'false',
+      road_details: 'false',
+    });
+
+    const response = await fetchJsonWithTimeout<KakaoDirectionsResponse>(
+      `https://apis-navi.kakaomobility.com/v1/directions?${params.toString()}`,
+      {
+        method: 'GET',
+        headers: {
+          Authorization: `KakaoAK ${restApiKey}`,
+        },
+      },
+      3500,
+    );
+
+    const vertexes = (response.routes?.[0]?.sections ?? [])
+      .flatMap((section) => section.roads ?? [])
+      .flatMap((road) => road.vertexes ?? []);
+    const points: Array<{ lat: number; lng: number }> = [];
+    for (let index = 0; index < vertexes.length - 1; index += 2) {
+      const lng = Number(vertexes[index]);
+      const lat = Number(vertexes[index + 1]);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        points.push({ lat, lng });
+      }
+    }
+
+    this.logger.log(
+      {
+        event: 'kakao.local.proxy.request.success',
+        endpoint: 'directions/walk',
+        keyType: 'REST',
+        pointCount: points.length,
+      },
+      KakaoLocalService.name,
+    );
+
+    return {
+      source: 'api' as const,
+      provider: 'kakao-directions' as const,
+      isFallback: false,
+      fallbackReason: null,
+      fetchedAt: new Date().toISOString(),
+      points,
+    };
+  }
+}

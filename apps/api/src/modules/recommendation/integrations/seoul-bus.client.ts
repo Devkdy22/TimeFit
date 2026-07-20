@@ -45,6 +45,12 @@ export interface SeoulBusVehiclePositionResult {
   source: 'api' | 'fallback';
 }
 
+export interface SeoulBusRoutePoint {
+  lat: number;
+  lng: number;
+  seq?: number;
+}
+
 export interface SeoulStationUidProbe {
   arsId: string;
   routeNoOrId?: string;
@@ -59,6 +65,8 @@ export interface SeoulBusRouteStation {
   arsId?: string;
   stationName: string;
   seq?: number;
+  lat?: number;
+  lng?: number;
 }
 
 interface ArrivalEntry {
@@ -559,6 +567,8 @@ export class SeoulBusClient {
             arsId: this.readString(row, ['arsId', 'arsID']) ?? undefined,
             stationName,
             seq: this.readNumber(row, ['seq', 'no', 'index']) ?? undefined,
+            lat: this.readNumber(row, ['gpsY', 'lat', 'latitude']) ?? undefined,
+            lng: this.readNumber(row, ['gpsX', 'lng', 'longitude']) ?? undefined,
           };
         })
         .filter((item): item is NonNullable<typeof item> => item !== null);
@@ -575,6 +585,114 @@ export class SeoulBusClient {
         {
           event: 'seoul_bus.request.exception',
           operation: 'busRouteInfo/getStaionByRoute',
+          message: error instanceof Error ? error.message : String(error),
+          busRouteId: routeId,
+        },
+        SeoulBusClient.name,
+      );
+      return [];
+    }
+  }
+
+  async findRouteIdsByRouteNo(routeNo: string): Promise<string[]> {
+    const normalized = (routeNo ?? '').trim();
+    if (!normalized) {
+      return [];
+    }
+    const baseUrl = this.appConfigService.seoulBusApiUrl;
+    const apiKey = this.getBusApiKey();
+    if (!baseUrl || !apiKey) {
+      return [];
+    }
+
+    try {
+      const params = new URLSearchParams({
+        serviceKey: apiKey,
+        resultType: 'json',
+        strSrch: normalized,
+      });
+      const url = `${this.trimTrailingSlash(baseUrl)}/busRouteInfo/getBusRouteList?${params.toString()}`;
+      const raw = await fetchJsonWithTimeout<SeoulApiEnvelope>(url, { method: 'GET' }, 3000);
+      this.logIfHeaderError(raw, 'busRouteInfo/getBusRouteList', { routeNo: normalized });
+      const compactInput = normalized.replace(/\s+/g, '').toLowerCase();
+      const candidates = this.unwrapRows(raw)
+        .map((row) => ({
+          id: this.readString(row, ['busRouteId', 'routeId', 'rtId']) ?? '',
+          no:
+            this.readString(row, ['busRouteNm', 'busRouteAbrv', 'rtNm', 'busNo'])
+              ?.replace(/\s+/g, '')
+              .toLowerCase() ?? '',
+        }))
+        .filter((item) => item.id.length > 0);
+
+      const exact = candidates.filter((item) => item.no === compactInput).map((item) => item.id);
+      if (exact.length > 0) {
+        return [...new Set(exact)].slice(0, 8);
+      }
+
+      const partial = candidates
+        .filter((item) => item.no.includes(compactInput) || compactInput.includes(item.no))
+        .map((item) => item.id);
+      if (partial.length > 0) {
+        return [...new Set(partial)].slice(0, 8);
+      }
+
+      return [...new Set(candidates.map((item) => item.id))].slice(0, 8);
+    } catch (error) {
+      this.logger.warn(
+        {
+          event: 'seoul_bus.request.exception',
+          operation: 'busRouteInfo/getBusRouteList',
+          message: error instanceof Error ? error.message : String(error),
+          routeNo: normalized,
+        },
+        SeoulBusClient.name,
+      );
+      return [];
+    }
+  }
+
+  async getRoutePathGeometry(busRouteId: string): Promise<SeoulBusRoutePoint[]> {
+    const routeId = (busRouteId ?? '').trim();
+    if (!routeId) {
+      return [];
+    }
+    const baseUrl = this.appConfigService.seoulBusApiUrl;
+    const apiKey = this.getBusApiKey();
+    if (!baseUrl || !apiKey) {
+      return [];
+    }
+
+    try {
+      const params = new URLSearchParams({
+        serviceKey: apiKey,
+        resultType: 'json',
+        busRouteId: routeId,
+      });
+      const url = `${this.trimTrailingSlash(baseUrl)}/busRouteInfo/getRoutePathList?${params.toString()}`;
+      const raw = await fetchJsonWithTimeout<SeoulApiEnvelope>(url, { method: 'GET' }, 3000);
+      this.logIfHeaderError(raw, 'busRouteInfo/getRoutePathList', { busRouteId: routeId });
+      return this.unwrapRows(raw)
+        .map((row) => {
+          const lat = this.readNumber(row, ['gpsY', 'lat', 'latitude']);
+          const lng = this.readNumber(row, ['gpsX', 'lng', 'longitude']);
+          if (lat === null || lng === null) {
+            return null;
+          }
+          const seq = this.readNumber(row, ['seq', 'no', 'index']);
+          return {
+            lat,
+            lng,
+            ...(seq !== null ? { seq } : {}),
+          };
+        })
+        .filter((point): point is SeoulBusRoutePoint => point !== null)
+        .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
+    } catch (error) {
+      this.logger.warn(
+        {
+          event: 'seoul_bus.request.exception',
+          operation: 'busRouteInfo/getRoutePathList',
           message: error instanceof Error ? error.message : String(error),
           busRouteId: routeId,
         },
