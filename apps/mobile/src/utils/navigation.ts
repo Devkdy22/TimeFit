@@ -1,40 +1,65 @@
-import { useRouter, type Router } from 'expo-router';
-import { APP_ROUTES } from '../constants/routes';
+import { usePathname, useRouter, type Router } from 'expo-router';
+import { APP_ROUTES, type AppRoutePath } from '../constants/routes';
 
 type AppRouter = Pick<Router, 'push' | 'replace' | 'back'>;
 
-export function createNavigationHelper(router: AppRouter) {
+function normalizePath(path: string) {
+  return path.replace(/\/$/, '') || '/';
+}
+
+function isSamePath(currentPathname: string, nextPath: AppRoutePath) {
+  return normalizePath(currentPathname) === normalizePath(nextPath);
+}
+
+export function createNavigationHelper(router: AppRouter, currentPathname = '') {
+  const pushUnique = (path: AppRoutePath) => {
+    if (isSamePath(currentPathname, path)) {
+      return;
+    }
+    router.push(path);
+  };
+
+  const replaceUnique = (path: AppRoutePath) => {
+    if (isSamePath(currentPathname, path)) {
+      return;
+    }
+    router.replace(path);
+  };
+
   return {
     goBack: () => router.back(),
-    goToHome: () => router.push(APP_ROUTES.beforeStartHome),
-    goToSearch: () => router.push(APP_ROUTES.beforeStartSearch),
-    goToRecommendation: () => router.push(APP_ROUTES.beforeDepartureRecommendation),
-    goToRecommendationDetail: () => router.push(APP_ROUTES.beforeDepartureDetail),
-    goToBeforeDepartureTransitPopup: () => router.push(APP_ROUTES.beforeDepartureTransitPopup),
-    goToTransit: () => router.push(APP_ROUTES.transitMain),
-    goToArrival: () => router.push(APP_ROUTES.transitArrival),
-    goToRoutines: () => router.push(APP_ROUTES.reengagementRoutines),
-    goToRoutineCreate: () => router.push(APP_ROUTES.reengagementRoutineCreate),
-    goToLogin: () => router.push(APP_ROUTES.reengagementLogin),
-    goToSettings: () => router.push(APP_ROUTES.reengagementSettings),
-    goToOnboarding: () => router.push(APP_ROUTES.beforeStartOnboarding),
-    goToDepartureNotificationSettings: () => router.push(APP_ROUTES.settingsDepartureNotification),
-    goToRoutineNotificationSettings: () => router.push(APP_ROUTES.settingsRoutineNotification),
-    goToEmergencyNotificationSettings: () => router.push(APP_ROUTES.settingsEmergencyNotification),
-    goToThemeSettings: () => router.push(APP_ROUTES.settingsTheme),
-    goToSettingsAccount: () => router.push(APP_ROUTES.settingsAccount),
-    goToLanguageSettings: () => router.push(APP_ROUTES.settingsLanguage),
-    goToUnitSettings: () => router.push(APP_ROUTES.settingsUnit),
-    goToTimeFormatSettings: () => router.push(APP_ROUTES.settingsTimeFormat),
-    goToTermsSettings: () => router.push(APP_ROUTES.settingsTerms),
-    goToPrivacySettings: () => router.push(APP_ROUTES.settingsPrivacy),
-    goToHelpSettings: () => router.push(APP_ROUTES.settingsHelp),
-    goToAboutSettings: () => router.push(APP_ROUTES.settingsAbout),
-    replaceToHome: () => router.replace(APP_ROUTES.beforeStartHome),
+    goToHome: () => pushUnique(APP_ROUTES.beforeStartHome),
+    goToSearch: () => pushUnique(APP_ROUTES.beforeStartSearch),
+    goToRecommendation: () => pushUnique(APP_ROUTES.beforeDepartureRecommendation),
+    goToRecommendationDetail: () => pushUnique(APP_ROUTES.beforeDepartureDetail),
+    goToBeforeDepartureTransitPopup: () => replaceUnique(APP_ROUTES.transitMain),
+    goToTransit: () => replaceUnique(APP_ROUTES.transitMain),
+    goToArrival: () => replaceUnique(APP_ROUTES.transitArrival),
+    goToRoutines: () => pushUnique(APP_ROUTES.reengagementRoutines),
+    goToRoutineCreate: () => pushUnique(APP_ROUTES.reengagementRoutineCreate),
+    goToLogin: () => pushUnique(APP_ROUTES.reengagementLogin),
+    goToSettings: () => pushUnique(APP_ROUTES.reengagementSettings),
+    goToOnboarding: () => pushUnique(APP_ROUTES.beforeStartOnboarding),
+    goToDepartureNotificationSettings: () => pushUnique(APP_ROUTES.settingsDepartureNotification),
+    goToRoutineNotificationSettings: () => pushUnique(APP_ROUTES.settingsRoutineNotification),
+    goToEmergencyNotificationSettings: () => pushUnique(APP_ROUTES.settingsEmergencyNotification),
+    goToThemeSettings: () => pushUnique(APP_ROUTES.settingsTheme),
+    goToSettingsAccount: () => pushUnique(APP_ROUTES.settingsAccount),
+    goToLanguageSettings: () => pushUnique(APP_ROUTES.settingsLanguage),
+    goToUnitSettings: () => pushUnique(APP_ROUTES.settingsUnit),
+    goToTimeFormatSettings: () => pushUnique(APP_ROUTES.settingsTimeFormat),
+    goToTermsSettings: () => pushUnique(APP_ROUTES.settingsTerms),
+    goToPrivacySettings: () => pushUnique(APP_ROUTES.settingsPrivacy),
+    goToHelpSettings: () => pushUnique(APP_ROUTES.settingsHelp),
+    goToAboutSettings: () => pushUnique(APP_ROUTES.settingsAbout),
+    replaceToHome: () => replaceUnique(APP_ROUTES.beforeStartHome),
+    replaceToSearch: () => replaceUnique(APP_ROUTES.beforeStartSearch),
+    replaceToRoutineCreate: () => replaceUnique(APP_ROUTES.reengagementRoutineCreate),
   };
 }
 
 export function useNavigationHelper() {
   const router = useRouter();
-  return createNavigationHelper(router);
+  const pathname = usePathname();
+  return createNavigationHelper(router, pathname);
 }

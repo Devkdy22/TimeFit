@@ -8,6 +8,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '../src/features/auth/context';
 import { CommutePlanProvider } from '../src/features/commute-state/context';
 import { RoutineProvider } from '../src/features/routine/context';
+import { AppNavigationCoordinator } from '../src/navigation/routeRecovery';
 import { preloadSubwayLines } from '../src/utils/subwayLineCache';
 import PretendardMedium from '../assets/fonts/Pretendard-Medium.ttf';
 import PretendardSemiBold from '../assets/fonts/Pretendard-SemiBold.ttf';
@@ -63,12 +64,13 @@ export default function RootLayout() {
         <AuthGate>
           <RoutineProvider>
             <CommutePlanProvider>
+              <AppNavigationCoordinator />
               <Stack screenOptions={{ headerShown: false }}>
                 <Stack.Screen name="(before-start)" />
                 <Stack.Screen name="(before-departure)" />
-                <Stack.Screen name="(transit)" />
-                <Stack.Screen name="(re-engagement)" />
                 <Stack.Screen name="(in-transit)" />
+                <Stack.Screen name="(re-engagement)" />
+                <Stack.Screen name="(transit)" />
                 <Stack.Screen name="(re-engage)" />
                 <Stack.Screen name="onboarding" options={{ gestureEnabled: false }} />
                 <Stack.Screen name="auth" options={{ gestureEnabled: false }} />

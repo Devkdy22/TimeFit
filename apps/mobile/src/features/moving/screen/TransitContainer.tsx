@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { BackHandler } from 'react-native';
 import { useMovingState } from '../hooks/useMovingState';
 import { TransitView } from './TransitView';
 import { useNavigationHelper } from '../../../utils/navigation';
@@ -7,6 +8,14 @@ export function TransitContainer() {
   const nav = useNavigationHelper();
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const state = useMovingState();
+
+  useEffect(() => {
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      nav.replaceToHome();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [nav]);
 
   return (
     <TransitView
@@ -29,7 +38,7 @@ export function TransitContainer() {
       timeyContext={state.timeyContext}
       timeyState={state.timeyState}
       onSetDetailOpen={setIsDetailOpen}
-      onPressBack={nav.goBack}
+      onPressBack={nav.replaceToHome}
     />
   );
 }

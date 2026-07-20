@@ -75,7 +75,7 @@ export function RouteDetailScreen() {
       steps={steps}
       originAddress={origin?.address ?? origin?.name ?? ''}
       destinationLabel={destination?.name ?? destination?.address ?? ''}
-      onPressStart={nav.goToBeforeDepartureTransitPopup}
+      onPressStart={nav.goToTransit}
       onPressBack={nav.goBack}
       onPressRefresh={() => {
         if (freezeRouteRefresh) {

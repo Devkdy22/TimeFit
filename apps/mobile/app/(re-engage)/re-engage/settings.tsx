@@ -1,6 +1,6 @@
-import { Redirect } from 'expo-router';
 import { APP_ROUTES } from '../../../src/constants/routes';
+import { DeprecatedRouteRedirect } from '../../../src/navigation/deprecatedRouteRedirect';
 
 export default function ReengageSettingsPage() {
-  return <Redirect href={APP_ROUTES.reengagementSettings} />;
+  return <DeprecatedRouteRedirect to={APP_ROUTES.reengagementSettings} />;
 }

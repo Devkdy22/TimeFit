@@ -1,5 +1,6 @@
-import { ArrivalScreen } from '../../../src/features/arrival/screen/ArrivalScreen';
+import { APP_ROUTES } from '../../../src/constants/routes';
+import { DeprecatedRouteRedirect } from '../../../src/navigation/deprecatedRouteRedirect';
 
 export default function TransitArrivalPage() {
-  return <ArrivalScreen />;
+  return <DeprecatedRouteRedirect to={APP_ROUTES.transitArrival} />;
 }

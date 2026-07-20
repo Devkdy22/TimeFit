@@ -14,10 +14,10 @@ export function LoginScreen() {
     try {
       await login(provider);
       if (pendingRoutineSeed) {
-        nav.goToRoutineCreate();
+        nav.replaceToRoutineCreate();
         return;
       }
-      nav.goToRoutines();
+      nav.replaceToHome();
     } catch (error) {
       if (shouldSuppressLoginAlert(error)) {
         return;

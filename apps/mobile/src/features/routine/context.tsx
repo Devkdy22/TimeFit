@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { AppState } from 'react-native';
 import { useAuth } from '../auth/context';
 import {
@@ -61,6 +61,69 @@ export function RoutineProvider({ children }: { children: ReactNode }) {
     Map<string, { key: string; promise: Promise<SavedPlace> }>
   >(new Map());
 
+  const syncRemoteRoutines = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!isLoggedIn || !profile?.id) {
+        return;
+      }
+
+      const userId = profile.id;
+      const sessionGenerationAtStart = getSessionGeneration();
+      try {
+        const remote = await getRoutines(signal);
+        if (signal?.aborted || sessionGenerationAtStart !== getSessionGeneration()) {
+          return;
+        }
+        const mapped: Routine[] = remote.map(routineFromRemote);
+        setRoutines(mapped);
+      } catch (error) {
+        if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+          return;
+        }
+        console.warn('[Routine] GET /routines sync failed', {
+          message: error instanceof Error ? error.message : String(error),
+          userId,
+        });
+      }
+    },
+    [getSessionGeneration, isLoggedIn, profile?.id],
+  );
+
+  const syncRemoteSavedPlaces = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!isLoggedIn || !profile?.id) {
+        return;
+      }
+
+      const userId = profile.id;
+      const sessionGenerationAtStart = getSessionGeneration();
+      try {
+        const remote = await getMyPlaces(signal);
+        if (signal?.aborted || sessionGenerationAtStart !== getSessionGeneration()) {
+          return;
+        }
+        const mapped: SavedPlace[] = remote.map((item) => ({
+          id: item.id,
+          label: item.label,
+          address: item.address,
+          latitude: item.lat,
+          longitude: item.lng,
+          updatedAt: item.updatedAt,
+        }));
+        setSavedPlaces(mapped);
+      } catch (error) {
+        if (signal?.aborted || (error instanceof Error && error.name === 'AbortError')) {
+          return;
+        }
+        console.warn('[Routine] GET /me/places sync failed', {
+          message: error instanceof Error ? error.message : String(error),
+          userId,
+        });
+      }
+    },
+    [getSessionGeneration, isLoggedIn, profile?.id],
+  );
+
   useEffect(() => {
     if (isLoggedIn && profile?.id) {
       return;
@@ -77,32 +140,12 @@ export function RoutineProvider({ children }: { children: ReactNode }) {
     }
 
     const controller = new AbortController();
-    void (async () => {
-      try {
-        const remote = await getRoutines(controller.signal);
-        if (controller.signal.aborted) {
-          return;
-        }
-        const mapped: Routine[] = remote.map(routineFromRemote);
-        setRoutines(mapped);
-      } catch (error) {
-        if (controller.signal.aborted) {
-          return;
-        }
-        if (error instanceof Error && error.name === 'AbortError') {
-          return;
-        }
-        console.warn('[Routine] GET /routines sync failed', {
-          message: error instanceof Error ? error.message : String(error),
-          userId: profile.id,
-        });
-      }
-    })();
+    void syncRemoteRoutines(controller.signal);
 
     return () => {
       controller.abort();
     };
-  }, [isLoggedIn, profile?.id]);
+  }, [isLoggedIn, profile?.id, syncRemoteRoutines]);
 
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
@@ -111,34 +154,14 @@ export function RoutineProvider({ children }: { children: ReactNode }) {
       }
 
       const controller = new AbortController();
-      void (async () => {
-        try {
-          const remote = await getMyPlaces(controller.signal);
-          const mapped: SavedPlace[] = remote.map((item) => ({
-            id: item.id,
-            label: item.label,
-            address: item.address,
-            latitude: item.lat,
-            longitude: item.lng,
-            updatedAt: item.updatedAt,
-          }));
-          setSavedPlaces(mapped);
-        } catch (error) {
-          if (error instanceof Error && error.name === 'AbortError') {
-            return;
-          }
-          console.warn('[Routine] foreground revalidation /me/places failed', {
-            message: error instanceof Error ? error.message : String(error),
-            userId: profile.id,
-          });
-        }
-      })();
+      void syncRemoteRoutines(controller.signal);
+      void syncRemoteSavedPlaces(controller.signal);
     });
 
     return () => {
       subscription.remove();
     };
-  }, [isLoggedIn, profile?.id]);
+  }, [isLoggedIn, profile?.id, syncRemoteRoutines, syncRemoteSavedPlaces]);
 
   useEffect(() => {
     if (!isLoggedIn || !profile?.id) {
@@ -146,39 +169,12 @@ export function RoutineProvider({ children }: { children: ReactNode }) {
     }
 
     const controller = new AbortController();
-    void (async () => {
-      try {
-        const remote = await getMyPlaces(controller.signal);
-        if (controller.signal.aborted) {
-          return;
-        }
-        const mapped: SavedPlace[] = remote.map((item) => ({
-          id: item.id,
-          label: item.label,
-          address: item.address,
-          latitude: item.lat,
-          longitude: item.lng,
-          updatedAt: item.updatedAt,
-        }));
-        setSavedPlaces(mapped);
-      } catch (error) {
-        if (controller.signal.aborted) {
-          return;
-        }
-        if (error instanceof Error && error.name === 'AbortError') {
-          return;
-        }
-        console.warn('[Routine] GET /me/places sync failed', {
-          message: error instanceof Error ? error.message : String(error),
-          userId: profile.id,
-        });
-      }
-    })();
+    void syncRemoteSavedPlaces(controller.signal);
 
     return () => {
       controller.abort();
     };
-  }, [isLoggedIn, profile?.id]);
+  }, [isLoggedIn, profile?.id, syncRemoteSavedPlaces]);
 
   const value = useMemo<RoutineContextValue>(
     () => ({

@@ -2,19 +2,8 @@ import { useEffect, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { APP_ROUTES } from '../src/constants/routes';
-import { useAuth, type SocialProvider } from '../src/features/auth/context';
-
-function firstParam(value: string | string[] | undefined): string | undefined {
-  return Array.isArray(value) ? value[0] : value;
-}
-
-function readProvider(value: string | string[] | undefined): SocialProvider | undefined {
-  const provider = firstParam(value);
-  if (provider === 'google' || provider === 'kakao' || provider === 'naver') {
-    return provider;
-  }
-  return undefined;
-}
+import { useAuth } from '../src/features/auth/context';
+import { claimSingleCallback, resolveOAuthCallbackRoute } from '../src/navigation/oauthCallbackRoute';
 
 export default function OAuthCallbackRoute() {
   const router = useRouter();
@@ -28,37 +17,26 @@ export default function OAuthCallbackRoute() {
   const handledRef = useRef(false);
 
   useEffect(() => {
-    if (handledRef.current) {
-      return;
-    }
-    handledRef.current = true;
-
-    const ticket = firstParam(params.ticket);
-    const error = firstParam(params.error);
-    const state = firstParam(params.state);
-    const provider = readProvider(params.provider);
-
-    if (!ticket && !error) {
-      router.replace(isLoggedIn ? APP_ROUTES.beforeStartHome : APP_ROUTES.reengagementLogin);
+    if (!claimSingleCallback(handledRef)) {
       return;
     }
 
-    void redeemOAuthCallback({
-      ticket,
-      error,
-      state,
-      provider,
-      source: 'auth_route',
-    })
+    const next = resolveOAuthCallbackRoute({ params, isLoggedIn });
+    if (next.action === 'redirect') {
+      router.replace(next.href);
+      return;
+    }
+
+    void redeemOAuthCallback(next.callback)
       .then(() => {
         router.replace(APP_ROUTES.beforeStartHome);
       })
       .catch((nextError: unknown) => {
         console.warn('[Auth][OAuth]', {
           event: 'oauth_route_redeem_failed',
-          provider,
-          hasTicket: Boolean(ticket),
-          hasState: Boolean(state),
+          provider: next.callback.provider,
+          hasTicket: Boolean(next.callback.ticket),
+          hasState: Boolean(next.callback.state),
           message: nextError instanceof Error ? nextError.message : 'unknown',
         });
         router.replace(APP_ROUTES.reengagementLogin);

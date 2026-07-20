@@ -5,8 +5,8 @@ export const APP_ROUTES = {
   beforeDepartureRecommendation: '/before-departure/recommendation',
   beforeDepartureDetail: '/before-departure/detail',
   beforeDepartureTransitPopup: '/before-departure/transit',
-  transitMain: '/transit/main',
-  transitArrival: '/transit/arrival',
+  transitMain: '/in-transit/moving',
+  transitArrival: '/in-transit/arrival',
   reengagementRoutines: '/re-engagement/routines',
   reengagementLogin: '/re-engagement/login',
   reengagementSettings: '/re-engagement/settings',
@@ -31,7 +31,6 @@ export const APP_ROUTES = {
   search: '/search',
   routeRecommend: '/route/recommend',
   routeDetail: '/route/detail',
-  moving: '/moving',
   testMap: '/test-map',
 } as const;
 

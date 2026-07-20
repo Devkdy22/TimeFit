@@ -1,3 +1,6 @@
 import { NativeModules } from 'react-native';
 
-export const MAP_ADAPTER_TYPE: 'mock' | 'kakao' = NativeModules.KakaoMaps ? 'kakao' : 'mock';
+const isProduction = process.env.NODE_ENV === 'production';
+
+export const MAP_ADAPTER_TYPE: 'mock' | 'kakao' =
+  NativeModules.KakaoMaps || isProduction ? 'kakao' : 'mock';

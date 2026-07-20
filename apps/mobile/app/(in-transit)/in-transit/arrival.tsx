@@ -1,6 +1,5 @@
-import { Redirect } from 'expo-router';
-import { APP_ROUTES } from '../../../src/constants/routes';
+import { ArrivalScreen } from '../../../src/features/arrival/screen/ArrivalScreen';
 
 export default function InTransitArrivalPage() {
-  return <Redirect href={APP_ROUTES.transitArrival} />;
+  return <ArrivalScreen />;
 }
