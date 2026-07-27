@@ -2,12 +2,18 @@
   "name": "timefit",
   "private": true,
   "packageManager": "pnpm@10.0.0",
+  "pnpm": {
+    "overrides": {
+      "freeport-async": "1.1.1"
+    }
+  },
   "scripts": {
     "dev": "turbo run dev --parallel",
     "dev:api": "pnpm --filter @timefit/api dev",
     "dev:mobile": "pnpm --filter @timefit/mobile dev",
     "build": "turbo run build",
     "lint": "turbo run lint",
+    "validate:timey": "ts-node --compiler-options '{\"module\":\"CommonJS\"}' scripts/validate-timey-assets.ts",
     "format": "prettier --write .",
     "prisma:generate": "pnpm --filter @timefit/api prisma:generate",
     "prisma:migrate": "pnpm --filter @timefit/api prisma:migrate"

@@ -9,6 +9,7 @@
     "plugins": [
       "expo-router",
       "expo-dev-client",
+      "expo-notifications",
       [
         "expo-location",
         {
@@ -38,6 +39,10 @@
             {
               "scheme": "timefit",
               "host": "expo-development-client"
+            },
+            {
+              "scheme": "timefit",
+              "host": "dev"
             },
             {
               "scheme": "exp+timefit-mobile"
