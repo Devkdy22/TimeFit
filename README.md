@@ -18,6 +18,15 @@ pnpm dev:api
 pnpm dev:mobile
 ```
 
+Android Dev Client에서 Expo CLI의 포트 탐색 오류가 발생하면 Metro를 직접 실행할 수 있습니다.
+
+```bash
+pnpm --filter @timefit/mobile dev:metro
+adb reverse tcp:8081 tcp:8081
+```
+
+그 다음 Dev Client에서 `http://localhost:8081`을 선택합니다. 이 경로는 Metro 번들링만 제공하며 OAuth, 지도, Push 같은 네이티브 기능은 development build에서 검증해야 합니다.
+
 ## Health Check
 ```bash
 curl http://localhost:3000/health
@@ -48,6 +57,8 @@ git push -u origin main
 - `ODSAY_API_KEY`
 - `SEOUL_BUS_KEY`
 - `FCM_SERVER_KEY`
+- `EXPO_PUSH_API_URL` (기본값: Expo Push Send API)
+- `EXPO_PUSH_TIMEOUT_MS` (기본값: 8000, 1000~30000)
 - `CORS_ORIGINS` (운영에서 whitelist)
 - `RATE_LIMIT_TTL_MS` (기본 60000)
 - `RATE_LIMIT_MAX` (기본 60)
