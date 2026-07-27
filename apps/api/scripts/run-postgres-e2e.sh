@@ -37,4 +37,4 @@ ${PNPM_BIN} exec prisma generate --schema prisma/schema.prisma
   -c 'DROP SCHEMA IF EXISTS public CASCADE' \
   -c 'CREATE SCHEMA public'
 ${PNPM_BIN} exec prisma migrate deploy --schema prisma/schema.prisma
-${PNPM_BIN} exec jest --config jest.e2e.config.ts --runInBand test/e2e/auth-routines-postgres.e2e-spec.ts
+${PNPM_BIN} exec jest --config jest.e2e.config.ts --runInBand

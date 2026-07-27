@@ -1,0 +1,77 @@
+# Draft only. Apply after provisioning an isolated QA PostgreSQL resource.
+# Never point DATABASE_URL at the production database.
+services:
+  - type: web
+    name: timefit-api-qa
+    runtime: node
+    plan: free
+    rootDir: .
+    autoDeploy: false
+    buildCommand: corepack enable && corepack prepare pnpm@10.0.0 --activate && pnpm install --frozen-lockfile && pnpm --filter @timefit/api prisma:generate && pnpm --filter @timefit/api exec prisma migrate deploy && pnpm --filter @timefit/api build
+    startCommand: cd apps/api && node dist/main.js
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TIMEFIT_ENVIRONMENT
+        value: qa
+      - key: TIMEFIT_DATABASE_TARGET
+        value: qa
+      - key: PORT
+        value: "10000"
+      - key: DATABASE_URL
+        sync: false
+      - key: PUBLIC_API_BASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: JWT_ACCESS_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: KAKAO_API_KEY
+        sync: false
+      - key: KAKAO_REST_API_KEY
+        sync: false
+      - key: NAVER_CLIENT_ID
+        sync: false
+      - key: NAVER_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: KAKAO_CLIENT_SECRET
+        sync: false
+      - key: WEATHER_API_KEY
+        sync: false
+      - key: SEOUL_API_KEY
+        sync: false
+      - key: SEOUL_OPEN_API_KEY
+        sync: false
+      - key: SEOUL_SUBWAY_API_KEY
+        sync: false
+      - key: FCM_SERVER_KEY
+        sync: false
+      - key: ODSAY_API_KEY
+        sync: false
+      - key: ODSAY_API_URL
+        value: https://api.odsay.com/v1/api
+      - key: EXPO_PUSH_API_URL
+        value: https://exp.host/--/api/v2/push/send
+      - key: SEOUL_BUS_API_URL
+        sync: false
+      - key: SEOUL_BUS_KEY
+        sync: false
+      - key: GYEONGGI_BUS_API_URL
+        sync: false
+      - key: GYEONGGI_BUS_KEY
+        sync: false
+      - key: INCHEON_BUS_API_URL
+        sync: false
+      - key: INCHEON_BUS_KEY
+        sync: false
+      - key: SEOUL_SUBWAY_API_URL
+        sync: false
+      - key: OAUTH_RETURN_TO_ALLOWLIST
+        sync: false

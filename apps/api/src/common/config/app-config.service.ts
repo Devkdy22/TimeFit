@@ -14,6 +14,10 @@ export class AppConfigService {
     return this.nodeEnv === 'production';
   }
 
+  get timeZone() {
+    return this.configService.get('TIMEFIT_TIMEZONE', { infer: true });
+  }
+
   get port() {
     return this.configService.get('PORT', { infer: true });
   }
@@ -113,6 +117,10 @@ export class AppConfigService {
 
   get expoPushApiUrl() {
     return this.configService.get('EXPO_PUSH_API_URL', { infer: true });
+  }
+
+  get expoPushTimeoutMs() {
+    return this.configService.get('EXPO_PUSH_TIMEOUT_MS', { infer: true });
   }
 
   get corsOrigins() {

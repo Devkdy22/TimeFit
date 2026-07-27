@@ -5,6 +5,7 @@ import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { validateEnv } from './common/config/env.schema';
 import { getRateLimitConfig } from './common/security/rate-limit.config';
 import { HealthController } from './modules/health/health.controller';
+import { ReadinessService } from './modules/health/readiness.service';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { RecommendationModule } from './modules/recommendation/recommendation.module';
 import { RoutinesModule } from './modules/routines/routines.module';
@@ -41,6 +42,7 @@ import { SavedPlacesModule } from './modules/saved-places/saved-places.module';
   ],
   controllers: [HealthController],
   providers: [
+    ReadinessService,
     AppConfigService,
     OptionalRedisProvider,
     SafeLogger,
