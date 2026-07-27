@@ -22,7 +22,7 @@ export function DetailTransitPanel({ data }: { data: LiveSheetProps }) {
       <LiveTimeline data={data} />
       <NextActionCard data={data} />
       <RealtimeStatusGrid data={data} />
-      <QuickActionRow />
+      <QuickActionRow onRefreshPosition={data.onRefreshPosition} onReroute={data.onReroute} />
     </BottomSheetScrollView>
   );
 }

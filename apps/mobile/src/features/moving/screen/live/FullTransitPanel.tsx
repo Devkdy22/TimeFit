@@ -31,7 +31,11 @@ export function FullTransitPanel({ data, stopsOpen, onToggleStops, bottomPadding
       <NextActionCard data={data} />
       <RealtimeStatusGrid data={data} />
       <AlternateRouteCard visible={data.status === 'urgent'} />
-      <TransitBottomActions />
+      <TransitBottomActions
+        onReroute={data.onReroute}
+        onRefreshPosition={data.onRefreshPosition}
+        onStop={data.onStop}
+      />
     </BottomSheetScrollView>
   );
 }

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Ionicons } from '@expo/vector-icons';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import type { LiveSheetProps } from './types';
 import { modeBadgeColor, statusPrimary, statusTone, stripPlusDuration } from './ui';
@@ -11,7 +11,7 @@ export function QuickTransitSummary({ data }: { data: LiveSheetProps }) {
   const remainingStops = Math.max(0, data.detailLines.length - currentIndex - 1);
   const progress = data.detailLines.length <= 1 ? 0 : Math.max(0, Math.min(1, currentIndex / (data.detailLines.length - 1)));
   const nextLine = data.detailLines[Math.min(data.detailLines.length - 1, currentIndex + 1)];
-  const nextStop = nextLine?.stopName ?? data.upcomingActionSubtitle;
+  const nextStop = nextLine?.boardingStopName ?? nextLine?.stopName ?? data.upcomingActionSubtitle;
   const nextStopLabel = nextStop && !nextStop.endsWith('역') ? `${nextStop}역` : (nextStop || '-');
   const cleanLineLabel = (nextLine?.lineLabel ?? '').replace(/^수도권\s*/g, '').trim();
   const boardingHintMatch = `${data.upcomingActionSubtitle ?? ''}`.match(/(\d+번\s*(?:출구|탑승|승강장))/);
@@ -34,7 +34,7 @@ export function QuickTransitSummary({ data }: { data: LiveSheetProps }) {
     .slice(0, 3)
     .map((line) => {
       if (line.mode === 'bus') return `버스 ${line.lineLabel}`;
-      if (line.mode === 'subway') return `${line.stopName}역 ${line.lineLabel.replace(/^수도권\s*/g, '').trim()}`;
+      if (line.mode === 'subway') return `${line.boardingStopName ?? line.stopName}역 ${line.lineLabel.replace(/^수도권\s*/g, '').trim()}`;
       return `도보`;
     });
   return (
@@ -100,9 +100,10 @@ export function QuickTransitSummary({ data }: { data: LiveSheetProps }) {
       <View style={styles.nextGuideCard}>
         <Text style={styles.planTitle}>다음 행동 순서</Text>
         {nextLine?.mode === 'subway' ? (
-          <Text style={styles.subwayGuide} numberOfLines={2}>
+        <Text style={styles.subwayGuide} numberOfLines={2}>
             {nextStopLabel}에서 {cleanLineLabel || '지하철'} 탑승
             {boardingHint ? ` · ${boardingHint} 이용 시 환승/하차 동선 유리` : ''}
+            {nextLine?.transferTip ? ` · ${nextLine.transferTip}` : ''}
           </Text>
         ) : null}
         <View style={styles.planRow}>
@@ -125,7 +126,16 @@ export function QuickTransitSummary({ data }: { data: LiveSheetProps }) {
       {data.status === 'urgent' ? (
         <View style={styles.altRow}>
           <Text style={styles.altText}>더 빠른 경로 발견</Text>
-          <View style={styles.altCta}><Text style={styles.altCtaText}>경로 변경</Text></View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="경로 변경"
+            accessibilityState={{ disabled: !data.onReroute }}
+            disabled={!data.onReroute}
+            onPress={data.onReroute}
+            style={({ pressed }) => [styles.altCta, pressed ? styles.altCtaPressed : null, !data.onReroute ? styles.altCtaDisabled : null]}
+          >
+            <Text style={styles.altCtaText}>경로 변경</Text>
+          </Pressable>
         </View>
       ) : null}
     </View>
@@ -180,5 +190,7 @@ const styles = StyleSheet.create({
   altRow: { marginTop: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   altText: { fontFamily: 'Pretendard-SemiBold', fontSize: 12, color: '#0E2C2C' },
   altCta: { borderRadius: 999, backgroundColor: '#58C7C2', paddingHorizontal: 10, paddingVertical: 5 },
+  altCtaPressed: { opacity: 0.72, transform: [{ scale: 0.97 }] },
+  altCtaDisabled: { opacity: 0.48 },
   altCtaText: { fontFamily: 'Pretendard-Bold', fontSize: 11, color: '#0E2C2C' },
 });

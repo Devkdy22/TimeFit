@@ -3,6 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import type { LiveSheetProps } from './types';
 import { statusPrimary, statusTone } from './ui';
+import { typographyPresets } from '../../../../theme/typography';
 
 interface Props {
   expanded: boolean;
@@ -56,13 +57,13 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   row: { flexDirection: 'row', alignItems: 'flex-end', gap: 8 },
-  time: { fontFamily: 'Pretendard-ExtraBold', fontSize: 40, lineHeight: 42, color: '#0F172A' },
-  label: { fontFamily: 'Pretendard-SemiBold', fontSize: 16, color: '#334155', marginBottom: 5 },
+  time: { ...typographyPresets.display, color: '#0F172A' },
+  label: { ...typographyPresets.bodyEmphasis, color: '#334155', marginBottom: 5 },
   toggle: { marginLeft: 'auto', width: 28, height: 28, borderRadius: 14, backgroundColor: '#F1F5F9', alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
   badge: { alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
-  badgeText: { fontFamily: 'Pretendard-Bold', fontSize: 14 },
+  badgeText: { ...typographyPresets.label },
   metaRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  meta: { fontFamily: 'Pretendard-Medium', fontSize: 12, color: '#64748B' },
+  meta: { ...typographyPresets.caption.md, color: '#64748B' },
   collapsed: {
     width: 66,
     height: 66,
@@ -79,5 +80,5 @@ const styles = StyleSheet.create({
     shadowRadius: 12,
     elevation: 6,
   },
-  collapsedTime: { fontFamily: 'Pretendard-Bold', fontSize: 12, color: '#0F172A' },
+  collapsedTime: { ...typographyPresets.label, color: '#0F172A' },
 });

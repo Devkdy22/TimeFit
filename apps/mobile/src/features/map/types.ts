@@ -29,6 +29,8 @@ export interface MapRouteSegment {
   polyline: MapCoordinate[];
   color: string;
   zIndex: number;
+  progressState?: 'completed' | 'current' | 'remaining';
+  progress?: number;
 }
 
 export interface MovingMapData {

@@ -1,8 +1,10 @@
 import type { MapCoordinate, MapRouteSegment } from '../../map/types';
 import type { MobilityRoutePayload } from '../../../services/api/client';
 import { fetchKakaoWalkGeometry } from '../../../services/api/client';
+import { fetchSeoulBusRoutePathGeometry, fetchSeoulStationsByRoute } from '../../../services/seoulBusApi';
 import { getTransitLineStyle } from '../../route-recommend/model/transitLineStyle';
 import { sliceSubwayLine } from '../../../data/subwayLineUtils';
+import { sliceBusRoutePath } from './routePrewarmGeometry';
 
 type PrewarmedRoute = {
   routeId: string;
@@ -128,23 +130,29 @@ export function prewarmRoute(route: MobilityRoutePayload) {
           if (busRaw.length >= 20) {
             return { id, mode, polyline: busRaw, color: pickColor(segment, mode), zIndex: zIndex(mode) };
           }
-          if (
-            typeof segment.startLat === 'number' &&
-            typeof segment.startLng === 'number' &&
-            typeof segment.endLat === 'number' &&
-            typeof segment.endLng === 'number'
-          ) {
+          if (segment.busRouteId) {
             try {
-              const road = await withTimeout(
-                fetchKakaoWalkGeometry({
-                  origin: { name: segment.startName ?? 'bus-start', lat: segment.startLat, lng: segment.startLng },
-                  destination: { name: segment.endName ?? 'bus-end', lat: segment.endLat, lng: segment.endLng },
-                }),
-                1600,
+              const [routePath, stations] = await withTimeout(
+                Promise.all([
+                  fetchSeoulBusRoutePathGeometry(segment.busRouteId),
+                  fetchSeoulStationsByRoute(segment.busRouteId),
+                ]),
+                2200,
               );
-              const normalized = normalizePathPoints(road);
-              if (normalized.length >= 20) {
-                return { id, mode, polyline: normalized, color: pickColor(segment, mode), zIndex: zIndex(mode) };
+              const normalizedPath = normalizePathPoints(routePath.map((point) => ({ lat: point.latitude, lng: point.longitude })));
+              if (normalizedPath.length >= 2) {
+                const startStation = stations.find(
+                  (station) => station.id === segment.startStationId || station.name?.trim() === segment.startName?.trim(),
+                );
+                const endStation = stations.find(
+                  (station) => station.id === segment.endStationId || station.name?.trim() === segment.endName?.trim(),
+                );
+                const sliced = sliceBusRoutePath(
+                  normalizedPath,
+                  startStation ? { lat: startStation.lat, lng: startStation.lng } : segmentStartPoint(segment),
+                  endStation ? { lat: endStation.lat, lng: endStation.lng } : segmentEndPoint(segment),
+                );
+                return { id, mode, polyline: sliced, color: pickColor(segment, mode), zIndex: zIndex(mode) };
               }
             } catch (error) {
               void error;

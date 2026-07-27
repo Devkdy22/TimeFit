@@ -124,6 +124,58 @@ export function buildKakaoMapHtml({
           });
         }
 
+        function distanceBetweenPoints(a, b) {
+          if (!isValidCoordinate(a) || !isValidCoordinate(b)) {
+            return 0;
+          }
+          var latScale = 111320;
+          var meanLatitude = ((a.lat + b.lat) / 2) * Math.PI / 180;
+          var latMeters = (b.lat - a.lat) * latScale;
+          var lngMeters = (b.lng - a.lng) * latScale * Math.cos(meanLatitude);
+          return Math.sqrt(latMeters * latMeters + lngMeters * lngMeters);
+        }
+
+        function toProgressPath(segment) {
+          if (!segment || segment.progressState === 'remaining') {
+            return [];
+          }
+          var points = (Array.isArray(segment.polyline) ? segment.polyline : []).filter(isValidCoordinate);
+          if (segment.progressState === 'completed') {
+            return toLatLngPath(points);
+          }
+          var progress = Math.max(0, Math.min(1, Number(segment.progress) || 0));
+          if (progress <= 0 || points.length < 2) {
+            return [];
+          }
+          var totalDistance = 0;
+          for (var distanceIndex = 1; distanceIndex < points.length; distanceIndex += 1) {
+            totalDistance += distanceBetweenPoints(points[distanceIndex - 1], points[distanceIndex]);
+          }
+          if (totalDistance <= 0) {
+            return toLatLngPath(points.slice(0, 2));
+          }
+
+          var targetDistance = totalDistance * progress;
+          var travelledDistance = 0;
+          var progressPoints = [points[0]];
+          for (var pointIndex = 1; pointIndex < points.length; pointIndex += 1) {
+            var start = points[pointIndex - 1];
+            var end = points[pointIndex];
+            var legDistance = distanceBetweenPoints(start, end);
+            if (travelledDistance + legDistance >= targetDistance) {
+              var ratio = legDistance > 0 ? (targetDistance - travelledDistance) / legDistance : 0;
+              progressPoints.push({
+                lat: start.lat + (end.lat - start.lat) * Math.max(0, Math.min(1, ratio)),
+                lng: start.lng + (end.lng - start.lng) * Math.max(0, Math.min(1, ratio)),
+              });
+              break;
+            }
+            progressPoints.push(end);
+            travelledDistance += legDistance;
+          }
+          return toLatLngPath(progressPoints);
+        }
+
         function clearRoutePolyline() {
           if (routePolyline) {
             routePolyline.setMap(null);
@@ -140,6 +192,9 @@ export function buildKakaoMapHtml({
           routeSegmentPolylines.forEach(function (item) {
             if (item && item.main) {
               item.main.setMap(null);
+            }
+            if (item && item.traveled) {
+              item.traveled.setMap(null);
             }
             if (item && item.outline) {
               item.outline.setMap(null);
@@ -723,6 +778,7 @@ export function buildKakaoMapHtml({
 
                 var style = styleBySegment(segment);
                 var isWalkSegment = segment && segment.mode === 'WALK';
+                var progressState = segment && segment.progressState ? segment.progressState : 'remaining';
                 var outline = null;
                 if (!isWalkSegment) {
                   outline = new kakao.maps.Polyline({
@@ -740,16 +796,29 @@ export function buildKakaoMapHtml({
                   path: latLngPath,
                   strokeWeight: style.innerWeight,
                   strokeColor: style.color,
-                  strokeOpacity: isWalkSegment ? 0.7 : 1,
+                  strokeOpacity: isWalkSegment ? (progressState === 'remaining' ? 0.28 : 0.7) : (progressState === 'remaining' ? 0.3 : 1),
                   strokeStyle: style.innerStyle,
                   zIndex: style.zIndex + 1,
                 });
                 main.setMap(map);
+                var traveledPath = toProgressPath(segment);
+                var traveled = null;
+                if (traveledPath.length >= 2) {
+                  traveled = new kakao.maps.Polyline({
+                    path: traveledPath,
+                    strokeWeight: style.innerWeight,
+                    strokeColor: style.color,
+                    strokeOpacity: isWalkSegment ? 0.95 : 1,
+                    strokeStyle: style.innerStyle,
+                    zIndex: style.zIndex + 2,
+                  });
+                  traveled.setMap(map);
+                }
                 if (isWalkSegment) {
                   drawWalkDotMarkers(segment.polyline || [], style.color, style.zIndex);
                 }
 
-                routeSegmentPolylines.push({ outline: outline, main: main });
+                routeSegmentPolylines.push({ outline: outline, main: main, traveled: traveled });
 
                 var rawPoints = Array.isArray(segment.polyline) ? segment.polyline : [];
                 if (rawPoints.length >= 2) {

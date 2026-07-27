@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState } from 'react-native';
+import { resolveApiBaseUrl } from '../config/apiEnvironment';
 import ReactNativeEventSource, {
   type EventSourceEvent,
   type EventSourceListener,
@@ -8,6 +9,7 @@ import {
   fetchRouteCandidates,
   getCurrentAccessTokenForTransport,
   sendTripPosition,
+  setTripAppState,
   startTripTracking,
   type MobilityRoutePayload,
   type RecommendLocation,
@@ -29,10 +31,12 @@ const routeCandidateInFlight = new Map<string, Promise<MobilityRoutePayload[]>>(
 interface MovementState {
   currentSegmentIndex: number;
   progress: number;
+  routeProgress: number;
   nextAction: string;
   distanceFromRouteMeters: number;
   isOffRoute: boolean;
   matchingConfidence: number;
+  matchedPoint?: { lat: number; lng: number };
 }
 
 interface UseTripTrackingInput {
@@ -102,9 +106,11 @@ interface UseTripTrackingState {
   } | null;
   isRunning: boolean;
   isConnectingSse: boolean;
+  isRerouting: boolean;
   error: string | null;
   start: () => Promise<void>;
   stop: () => void;
+  refreshPosition: () => Promise<void>;
 }
 
 type EventSourceState = 'idle' | 'connecting' | 'open' | 'closed' | 'error';
@@ -113,6 +119,7 @@ type TripSseEventType =
   | 'ETA_CHANGED'
   | 'STATUS_CHANGED'
   | 'REROUTED'
+  | 'ROUTE_UPDATED'
   | 'POSITION_UPDATED'
   | 'OFF_ROUTE'
   | 'PING'
@@ -137,6 +144,7 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
   } | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [isConnectingSse, setIsConnectingSse] = useState(false);
+  const [isRerouting, setIsRerouting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const isRunningRef = useRef(false);
 
@@ -155,6 +163,8 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
   const eventSourceStateRef = useRef<EventSourceState>('idle');
   const activeLoopCountRef = useRef(0);
   const lastPositionTimestampRef = useRef(0);
+  const lastSseTimestampRef = useRef(0);
+  const reroutingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const startIdempotencyRef = useRef<{ key: string; fingerprint: string } | null>(null);
 
   const logDebug = useCallback(
@@ -213,6 +223,12 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
     }
   }, [updateActiveLoopCount]);
 
+  const clearReroutingTimer = useCallback(() => {
+    if (!reroutingTimerRef.current) return;
+    clearTimeout(reroutingTimerRef.current);
+    reroutingTimerRef.current = null;
+  }, []);
+
   const applyEventPayload = useCallback((payload: Record<string, unknown>) => {
     const routeSummary = payload.routeSummary as
       | {
@@ -225,10 +241,12 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       | {
           currentSegmentIndex: number;
           progress: number;
+          routeProgress?: number;
           nextAction: string;
           distanceFromRouteMeters: number;
           isOffRoute: boolean;
           matchingConfidence?: number;
+          matchedPoint?: { lat: number; lng: number };
         }
       | undefined;
 
@@ -236,10 +254,12 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       setMovement({
         currentSegmentIndex: movementPayload.currentSegmentIndex,
         progress: movementPayload.progress,
+        routeProgress: movementPayload.routeProgress ?? movementPayload.progress,
         nextAction: movementPayload.nextAction,
         distanceFromRouteMeters: movementPayload.distanceFromRouteMeters,
         isOffRoute: movementPayload.isOffRoute,
         matchingConfidence: movementPayload.matchingConfidence ?? 0,
+        matchedPoint: movementPayload.matchedPoint,
       });
       setNextAction(movementPayload.nextAction);
     }
@@ -258,6 +278,27 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       setDelayRisk(risk);
     }
   }, []);
+
+  const acceptSsePayload = useCallback((payload: Record<string, unknown>) => {
+    const rawTimestamp = payload.timestamp;
+    if (typeof rawTimestamp !== 'string' && typeof rawTimestamp !== 'number') {
+      return true;
+    }
+
+    const timestampMs = typeof rawTimestamp === 'number' ? rawTimestamp : Date.parse(rawTimestamp);
+    if (!Number.isFinite(timestampMs)) {
+      return true;
+    }
+    if (timestampMs < lastSseTimestampRef.current) {
+      logDebug('sse_stale_event_ignored', {
+        eventTimestamp: rawTimestamp,
+        lastEventTimestamp: new Date(lastSseTimestampRef.current).toISOString(),
+      });
+      return false;
+    }
+    lastSseTimestampRef.current = timestampMs;
+    return true;
+  }, [logDebug]);
 
   const connectSse = useCallback(
     (nextTripId: string, generation: number) => {
@@ -283,11 +324,7 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       setIsConnectingSse(true);
       eventSourceStateRef.current = 'connecting';
 
-      const base =
-        process.env.EXPO_PUBLIC_API_URL ??
-        process.env.EXPO_PUBLIC_API_BASE_URL ??
-        'https://timefit-api.onrender.com';
-      const normalizedBase = base.replace(/\/$/, '');
+      const normalizedBase = resolveApiBaseUrl();
       const lastEventId = lastEventIdRef.current;
       const query = lastEventId ? `?lastEventId=${encodeURIComponent(lastEventId)}` : '';
       const accessToken = getCurrentAccessTokenForTransport();
@@ -318,7 +355,7 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       });
 
       source.addEventListener('open', () => {
-        if (generation !== sessionGenerationRef.current) {
+        if (generation !== sessionGenerationRef.current || eventSourceRef.current !== source) {
           return;
         }
         reconnectAttemptRef.current = 0;
@@ -332,7 +369,7 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
 
       const handleNamedEvent = (eventType: Exclude<TripSseEventType, 'ERROR'>) => {
         source.addEventListener(eventType, (event: EventSourceEvent<typeof eventType, TripSseEventType>) => {
-          if (generation !== sessionGenerationRef.current) {
+          if (generation !== sessionGenerationRef.current || eventSourceRef.current !== source) {
             return;
           }
 
@@ -343,6 +380,10 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
 
           try {
             const payload = JSON.parse(event.data ?? '{}') as Record<string, unknown>;
+
+            if (!acceptSsePayload(payload)) {
+              return;
+            }
 
             if (eventType === 'INIT') {
               const initPayload = payload.payload as
@@ -361,9 +402,24 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
             }
 
             if (eventType === 'REROUTED') {
+              clearReroutingTimer();
+              setIsRerouting(true);
+              reroutingTimerRef.current = setTimeout(() => {
+                if (generation === sessionGenerationRef.current) {
+                  setIsRerouting(false);
+                }
+                reroutingTimerRef.current = null;
+              }, 8_000);
               const rerouted = payload.newRoute as MobilityRoutePayload | undefined;
               if (rerouted) {
                 setRoute(rerouted);
+              }
+            }
+
+            if (eventType === 'ROUTE_UPDATED') {
+              const updatedRoute = payload.route as MobilityRoutePayload | undefined;
+              if (updatedRoute) {
+                setRoute(updatedRoute);
               }
             }
 
@@ -383,6 +439,7 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
         'ETA_CHANGED',
         'STATUS_CHANGED',
         'REROUTED',
+        'ROUTE_UPDATED',
         'POSITION_UPDATED',
         'OFF_ROUTE',
         'PING',
@@ -390,7 +447,7 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       eventTypes.forEach(handleNamedEvent);
 
       source.addEventListener('ERROR', (event: EventSourceEvent<'ERROR', TripSseEventType>) => {
-        if (generation !== sessionGenerationRef.current) {
+        if (generation !== sessionGenerationRef.current || eventSourceRef.current !== source) {
           return;
         }
         try {
@@ -409,16 +466,20 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
           });
         }
         source.close();
+        if (eventSourceRef.current === source) {
+          eventSourceRef.current = null;
+        }
         eventSourceStateRef.current = 'closed';
         updateActiveLoopCount();
       });
 
       const handleTransportError: EventSourceListener<TripSseEventType, 'error'> = (event) => {
-        if (generation !== sessionGenerationRef.current) {
+        if (generation !== sessionGenerationRef.current || eventSourceRef.current !== source) {
           return;
         }
         setIsConnectingSse(false);
         source.close();
+        eventSourceRef.current = null;
         eventSourceStateRef.current = 'error';
         updateActiveLoopCount();
 
@@ -469,7 +530,7 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
         });
       };
     },
-    [applyEventPayload, clearReconnectTimer, closeEventSource, logDebug, updateActiveLoopCount],
+    [acceptSsePayload, applyEventPayload, clearReconnectTimer, clearReroutingTimer, closeEventSource, logDebug, updateActiveLoopCount],
   );
 
   const sendPositionTick = useCallback(async () => {
@@ -503,10 +564,12 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       setMovement({
         currentSegmentIndex: movementResult.currentSegmentIndex,
         progress: movementResult.progress,
+        routeProgress: movementResult.routeProgress ?? movementResult.progress,
         nextAction: movementResult.nextAction,
         distanceFromRouteMeters: movementResult.distanceFromRouteMeters,
         isOffRoute: movementResult.isOffRoute,
         matchingConfidence: movementResult.matchingConfidence,
+        matchedPoint: movementResult.matchedPoint,
       });
       setNextAction(movementResult.nextAction);
     } catch (err) {
@@ -539,6 +602,9 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
     setIsRunning(false);
     startRequestedRef.current = false;
     startIdempotencyRef.current = null;
+    lastSseTimestampRef.current = 0;
+    clearReroutingTimer();
+    setIsRerouting(false);
     void clearStoredActiveTripId();
     clearPositionTimer();
     clearReconnectTimer();
@@ -547,7 +613,7 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
     reconnectAttemptRef.current = 0;
     positionInFlightRef.current = false;
     logDebug('tracking_stopped');
-  }, [clearPositionTimer, clearReconnectTimer, closeEventSource, logDebug]);
+  }, [clearPositionTimer, clearReconnectTimer, clearReroutingTimer, closeEventSource, logDebug]);
 
   const start = useCallback(async () => {
     if (startRequestedRef.current || isRunning) {
@@ -565,6 +631,9 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
     setError(null);
     reconnectAttemptRef.current = 0;
     lastEventIdRef.current = null;
+    lastSseTimestampRef.current = 0;
+    clearReroutingTimer();
+    setIsRerouting(false);
     lastPositionTimestampRef.current = 0;
     logDebug('tracking_start_requested', {
       generation,
@@ -632,6 +701,15 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       });
 
       connectSse(started.tripId, generation);
+      void setTripAppState(
+        started.tripId,
+        appStateRef.current === 'active' ? 'foreground' : 'background',
+      ).catch((error: unknown) => {
+        logDebug('trip_app_state_initial_sync_failed', {
+          appState: appStateRef.current,
+          message: error instanceof Error ? error.message : 'unknown_error',
+        });
+      });
       startPositionLoop();
       void sendPositionTick();
     } catch (err) {
@@ -643,6 +721,10 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       });
     }
   }, [canStart, connectSse, input, isRunning, logDebug, sendPositionTick, startPositionLoop]);
+
+  const refreshPosition = useCallback(async () => {
+    await sendPositionTick();
+  }, [sendPositionTick]);
 
   useEffect(() => {
     isRunningRef.current = isRunning;
@@ -657,13 +739,22 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
       appStateRef.current = nextState;
       if (isRunningRef.current) {
         startPositionLoop();
+        const activeTripId = tripIdRef.current;
+        if (activeTripId) {
+          void setTripAppState(activeTripId, nextState === 'active' ? 'foreground' : 'background').catch((error: unknown) => {
+            logDebug('trip_app_state_sync_failed', {
+              appState: nextState,
+              message: error instanceof Error ? error.message : 'unknown_error',
+            });
+          });
+        }
       }
     });
 
     return () => {
       appStateListenerRef.current?.remove();
     };
-  }, [startPositionLoop]);
+  }, [logDebug, startPositionLoop]);
 
   useEffect(() => {
     mountCountRef.current += 1;
@@ -687,9 +778,11 @@ export function useTripTracking(input: UseTripTrackingInput): UseTripTrackingSta
     currentPosition,
     isRunning,
     isConnectingSse,
+    isRerouting,
     error,
     start,
     stop,
+    refreshPosition,
   };
 }
 

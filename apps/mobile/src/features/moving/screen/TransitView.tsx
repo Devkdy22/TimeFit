@@ -13,7 +13,7 @@ import { HeroStatusCard } from './live/HeroStatusCard';
 import { FloatingMapControls } from './live/FloatingMapControls';
 import { LiveBottomSheet } from './live/LiveBottomSheet';
 import type { LiveSheetProps, TransitLineItem } from './live/types';
-import { Timey } from '../../../components/timey';
+import { TimeyStage } from '../../../components/timey';
 import type { TimeyContext, TimeyState } from '../../../domain/timey/timeyTypes';
 import { getTimeyAccessibilityLabel } from '../../../components/timey/TimeyController';
 import { trackTimeyStateChanged, trackTimeyStateShown } from '../../../domain/timey/timeyAnalytics';
@@ -38,6 +38,9 @@ export interface TransitViewProps {
   detailLines: TransitLineItem[];
   timeyContext: TimeyContext;
   timeyState: TimeyState;
+  onRefreshPosition: () => void;
+  onReroute: () => void;
+  onStop: () => void;
   onSetDetailOpen: (open: boolean) => void;
   onPressBack: () => void;
 }
@@ -54,7 +57,7 @@ function toSegmentsKey(segments: MovingMapData['routeSegments']) {
       const last = segment.polyline[segment.polyline.length - 1];
       const firstKey = first ? `${first.lat.toFixed(5)},${first.lng.toFixed(5)}` : 'none';
       const lastKey = last ? `${last.lat.toFixed(5)},${last.lng.toFixed(5)}` : 'none';
-      return `${segment.id}:${segment.mode}:${segment.polyline.length}:${firstKey}:${lastKey}`;
+      return `${segment.id}:${segment.mode}:${segment.polyline.length}:${firstKey}:${lastKey}:${segment.progressState ?? 'remaining'}:${(segment.progress ?? 0).toFixed(3)}`;
     })
     .join('|');
 }
@@ -92,6 +95,9 @@ export function TransitView({
   detailLines,
   timeyContext,
   timeyState,
+  onRefreshPosition,
+  onReroute,
+  onStop,
   onSetDetailOpen,
   onPressBack,
 }: TransitViewProps) {
@@ -126,8 +132,11 @@ export function TransitView({
       upcomingActionTitle,
       upcomingActionSubtitle,
       detailLines,
+      onRefreshPosition,
+      onReroute,
+      onStop,
     }),
-    [arrivalTime, currentTime, detailLines, mainAction, remainingTime, stageText, status, supportText, upcomingActionSubtitle, upcomingActionTitle],
+    [arrivalTime, currentTime, detailLines, mainAction, onRefreshPosition, onReroute, onStop, remainingTime, stageText, status, supportText, upcomingActionSubtitle, upcomingActionTitle],
   );
   const prevTimeyStateRef = useRef<TimeyState | null>(null);
   const hasRealtimeSignal = timeyContext.hasRealtime !== false;
@@ -252,12 +261,13 @@ export function TransitView({
       <View style={[styles.heroWrap, { top: heroTop }]} {...heroPanResponder.panHandlers}>
         <HeroStatusCard expanded={heroExpanded} onToggle={() => setHeroExpanded((v) => !v)} data={sheetData} />
         <View pointerEvents="none" style={styles.timeyWrap}>
-          <Timey
+          <TimeyStage
+            variant="map"
             state={timeyState}
-            size="md"
             animated={hasRealtimeSignal}
             glow
             animationMode={liveAnimationMode}
+            renderStyle="soft3d"
             accessibilityLabel={getTimeyAccessibilityLabel(timeyState)}
           />
         </View>

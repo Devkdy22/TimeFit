@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import BestIcon from '../../../../assets/icons/best.png';
 import { HomeTabBar } from '../../../components/home';
-import { Timey, resolveTimeyState } from '../../../components/timey';
+import { TimeyStage, resolveTimeyState } from '../../../components/timey';
 import type { UiStatus } from '../../../theme/status-config';
 import { getTransitLineStyle } from '../model/transitLineStyle';
 import type { SelectedRouteSummary as RouteCardItem } from '../model/selectedRoute';
@@ -648,7 +648,7 @@ function BestRouteCard({
     <View style={styles.bestCardWrap}>
       <View style={styles.bestHangWrap}>
         <Animated.View style={[styles.hangingTimiClip, peekAnimStyle]}>
-          <Timey state={timeyState} size={122} animated glow animationMode="static" />
+          <TimeyStage variant="route" state={timeyState} animated glow animationMode="static" renderStyle="soft3d" />
         </Animated.View>
         <View style={styles.bestRibbon}>
           <Text allowFontScaling={false} style={styles.bestRibbonText}>

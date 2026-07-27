@@ -37,6 +37,12 @@ export function TransitContainer() {
       detailLines={state.detailLines}
       timeyContext={state.timeyContext}
       timeyState={state.timeyState}
+      onRefreshPosition={() => void state.refreshPosition()}
+      onReroute={() => void state.refreshPosition()}
+      onStop={() => {
+        state.stopTracking();
+        nav.replaceToHome();
+      }}
       onSetDetailOpen={setIsDetailOpen}
       onPressBack={nav.replaceToHome}
     />

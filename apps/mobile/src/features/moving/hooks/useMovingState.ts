@@ -5,6 +5,7 @@ import { useTripTracking } from '../../../hooks/useTripTracking';
 import { movingMapMockData } from '../../../mocks/map';
 import { TIMEY_FEATURES } from '../../../config/features';
 import type { MapCoordinate, MapRouteSegment, MovingMapData } from '../../map/types';
+import { resolveMapCurrentLocation } from '../../map/mapCurrentLocation';
 import type { UiStatus } from '../../../theme/status-config';
 import {
   fetchKakaoWalkGeometry,
@@ -30,14 +31,18 @@ import { resolveTimeyStateMachine } from '../../../domain/timey/timeyStateMachin
 import { advanceStableTimeySnapshot } from '../../../domain/timey/timeyTransitionGuard';
 import type { TimeyContext, TimeyTransitionSnapshot } from '../../../domain/timey/timeyTypes';
 import { shouldAutoStartTracking } from './autoStartGuard';
+import { mapVisibleSegmentIndices } from '../model/detailLineMapping';
 
 interface TransitLineItem {
   id: string;
+  sourceSegmentIndex: number;
+  displaySegmentIndex: number;
   mode: 'walk' | 'bus' | 'subway';
   lineLabel: string;
   etaText: string;
   stopName: string;
   boardingStopName?: string;
+  transferTip?: string;
   fastExitHint?: string;
   isCurrent: boolean;
 }
@@ -1476,7 +1481,7 @@ export function useMovingState() {
   }, [destination, origin, selectedRoute?.id, selectedRoute?.rawRoute, tracking.route?.id, tracking.route]);
 
   const status = mapApiStatusToUiStatus(tracking.status);
-  const progress = Math.max(0, Math.min(1, tracking.movement?.progress ?? 0));
+  const progress = Math.max(0, Math.min(1, tracking.movement?.routeProgress ?? tracking.movement?.progress ?? 0));
   const progressPercent = Math.round(progress * 100);
   const remainingDistanceMeters = Math.max(0, Math.round(tracking.movement?.distanceFromRouteMeters ?? 0));
   const remainingTimeMinutes = Math.max(1, Math.round((1 - progress) * ((tracking.route?.estimatedTravelMinutes ?? 45))));
@@ -1487,7 +1492,20 @@ export function useMovingState() {
 
   const mapData: MovingMapData = useMemo(() => {
     const fallback = TIMEY_FEATURES.enableDemoMocks ? movingMapMockData : null;
-    const routeSegments = resolvedRouteSegments;
+    const mobilitySegments = tracking.route?.mobilitySegments ?? [];
+    const rawCurrentIndex = Math.max(0, tracking.movement?.currentSegmentIndex ?? 0);
+    const visibleCurrentIndex = mobilitySegments
+      .slice(0, rawCurrentIndex)
+      .filter((segment) => segment.mode !== 'car').length;
+    const currentProgress = Math.max(0, Math.min(1, tracking.movement?.progress ?? 0));
+    const routeSegments = resolvedRouteSegments.map((segment, index) => ({
+      ...segment,
+      progressState:
+        index < visibleCurrentIndex ? ('completed' as const) :
+        index === visibleCurrentIndex ? ('current' as const) :
+        ('remaining' as const),
+      progress: index < visibleCurrentIndex ? 1 : index === visibleCurrentIndex ? currentProgress : 0,
+    }));
     const routePathPoints =
       routeSegments.length > 0
         ? toPathFromRouteSegments(routeSegments)
@@ -1501,9 +1519,12 @@ export function useMovingState() {
       (origin ? { lat: origin.latitude, lng: origin.longitude } : null) ??
       (destination ? { lat: destination.latitude, lng: destination.longitude } : null) ??
       fallback?.currentLocation ?? { lat: 0, lng: 0 };
-    const liveCurrent = tracking.currentPosition
-      ? { lat: tracking.currentPosition.lat, lng: tracking.currentPosition.lng }
-      : null;
+    const liveCurrent = resolveMapCurrentLocation(
+      tracking.currentPosition
+        ? { lat: tracking.currentPosition.lat, lng: tracking.currentPosition.lng }
+        : null,
+      tracking.movement,
+    );
 
     return {
       currentLocation: {
@@ -1526,40 +1547,59 @@ export function useMovingState() {
         status,
       },
     };
-  }, [progress, resolvedRouteSegments, status, tracking.currentPosition, tracking.nextAction, tracking.route?.id]);
+  }, [
+    progress,
+    resolvedRouteSegments,
+    status,
+    tracking.currentPosition,
+    tracking.movement,
+    tracking.nextAction,
+    tracking.route?.id,
+  ]);
 
   const detailLines: TransitLineItem[] = useMemo(() => {
     const segments = tracking.route?.mobilitySegments ?? [];
     const selectedSegments = selectedRoute?.segments ?? [];
     const currentIndex = tracking.movement?.currentSegmentIndex ?? 0;
-    return segments
-      .filter((segment) => segment.mode !== 'car')
-      .map((segment, index) => {
-        const selectedMatch = selectedSegments[index];
-        const stopNameFromSelected = selectedMatch?.endName ?? selectedMatch?.startName;
-        const boardingStopName = selectedMatch?.startName ?? stopNameFromSelected;
-        const fastExitHint =
-          extractFastExitHint(selectedMatch?.startName) ??
-          extractFastExitHint(selectedMatch?.endName) ??
-          extractFastExitHint(segment.lineLabel);
-        return {
-          id: `${segment.mode}-${index}`,
-          mode: segment.mode as 'walk' | 'bus' | 'subway',
-          lineLabel:
-            segment.mode === 'walk'
-              ? `도보 ${segment.durationMinutes}분`
-              : (segment.lineLabel ?? (segment.mode === 'bus' ? '버스' : '지하철')),
-          etaText:
-            segment.mode === 'walk'
-              ? `${segment.durationMinutes}분`
-              : `${segment.realtimeInfo?.etaMinutes ?? segment.durationMinutes}분`,
-          stopName:
-            stopNameFromSelected ?? (segment.mode === 'walk' ? '도보 이동' : '하차 지점 정보 확인중'),
-          boardingStopName: boardingStopName ?? undefined,
-          fastExitHint: fastExitHint ?? undefined,
-          isCurrent: index === currentIndex,
-        };
-      });
+    const visibleSegmentSourceIndices = mapVisibleSegmentIndices(segments);
+    return visibleSegmentSourceIndices.map((sourceIndex, index) => {
+      const segment = segments[sourceIndex];
+      const selectedMatch = selectedSegments[index];
+      const stopNameFromSelected = selectedMatch?.endName ?? selectedMatch?.startName;
+      const boardingStopName = selectedMatch?.startName ?? stopNameFromSelected;
+      const fastExitHint =
+        extractFastExitHint(selectedMatch?.startName) ??
+        extractFastExitHint(selectedMatch?.endName) ??
+        extractFastExitHint(segment.lineLabel);
+      return {
+        id: `${segment.mode}-${index}`,
+        sourceSegmentIndex: sourceIndex,
+        displaySegmentIndex: index,
+        mode: segment.mode as 'walk' | 'bus' | 'subway',
+        lineLabel:
+          segment.mode === 'walk'
+            ? `도보 ${segment.durationMinutes}분`
+            : (segment.lineLabel ?? (segment.mode === 'bus' ? '버스' : '지하철')),
+        etaText:
+          segment.mode === 'walk'
+            ? `${segment.durationMinutes}분`
+            : `${segment.realtimeInfo?.etaMinutes ?? segment.durationMinutes}분`,
+        stopName:
+          stopNameFromSelected ?? (segment.mode === 'walk' ? '도보 이동' : '하차 지점 정보 확인중'),
+        boardingStopName: boardingStopName ?? undefined,
+        transferTip: selectedMatch?.transferTip ?? undefined,
+        fastExitHint: fastExitHint ?? undefined,
+        // `currentSegmentIndex` refers to the full route, while detailLines
+        // intentionally omits car segments. Preserve the source index for
+        // current-state matching while selecting route metadata by visible
+        // segment index.
+        isCurrent: sourceIndex === currentIndex,
+        realtimeStatus: segment.realtimeStatus,
+        realtimeUpdatedAt: segment.realtimeInfo?.updatedAt,
+        matchingConfidence: segment.realtimeInfo?.matchingConfidence,
+        realtimeSource: segment.realtimeInfo?.source,
+      };
+    });
   }, [selectedRoute?.segments, tracking.movement?.currentSegmentIndex, tracking.route?.mobilitySegments]);
   const stableTimeySnapshotRef = useRef<TimeyTransitionSnapshot | null>(null);
 
@@ -1594,7 +1634,7 @@ export function useMovingState() {
   }, [rawTimeyState, timeyContext]);
 
   const currentActionText = useMemo(() => {
-    const currentIndex = Math.max(0, tracking.movement?.currentSegmentIndex ?? 0);
+    const currentIndex = Math.max(0, detailLines.findIndex((line) => line.isCurrent));
     const current = detailLines[currentIndex];
     const next = detailLines[currentIndex + 1];
     if (!current) {
@@ -1625,7 +1665,7 @@ export function useMovingState() {
   }, [detailLines, tracking.movement?.currentSegmentIndex]);
 
   const upcomingAction: UpcomingAction = useMemo(() => {
-    const currentIndex = Math.max(0, tracking.movement?.currentSegmentIndex ?? 0);
+    const currentIndex = Math.max(0, detailLines.findIndex((line) => line.isCurrent));
     const current = detailLines[currentIndex];
     const next = detailLines[currentIndex + 1];
     const defaultEta = minuteTextFromEta(next?.etaText ?? current?.etaText, remainingTimeMinutes);
@@ -1671,7 +1711,7 @@ export function useMovingState() {
   }, [arrivalAt, detailLines, remainingTimeMinutes, tracking.movement?.currentSegmentIndex]);
 
   const followupActionText = useMemo(() => {
-    const currentIndex = Math.max(0, tracking.movement?.currentSegmentIndex ?? 0);
+    const currentIndex = Math.max(0, detailLines.findIndex((line) => line.isCurrent));
     const current = detailLines[currentIndex];
     const next = detailLines[currentIndex + 1];
     const nextNext = detailLines[currentIndex + 2];
@@ -1730,6 +1770,8 @@ export function useMovingState() {
     status,
     isConnectingSse: tracking.isConnectingSse,
     error: tracking.error,
+    refreshPosition: tracking.refreshPosition,
+    stopTracking: tracking.stop,
     nextActionText: currentActionText,
     progressPercent,
     remainingDistanceText: `${remainingDistanceMeters}m`,

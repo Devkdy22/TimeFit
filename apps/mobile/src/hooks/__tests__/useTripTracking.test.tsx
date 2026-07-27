@@ -33,6 +33,7 @@ import {
   fetchRouteCandidates,
   getCurrentAccessTokenForTransport,
   sendTripPosition,
+  setTripAppState,
   startTripTracking,
   type MobilityRoutePayload,
 } from '../../services/api/client';
@@ -41,6 +42,7 @@ jest.mock('../../services/api/client', () => ({
   fetchRouteCandidates: jest.fn(),
   getCurrentAccessTokenForTransport: jest.fn(),
   sendTripPosition: jest.fn(),
+  setTripAppState: jest.fn(),
   startTripTracking: jest.fn(),
 }));
 
@@ -60,7 +62,11 @@ class MockEventSource {
   public readonly init?: { headers?: Record<string, string>; pollingInterval?: number };
   public onerror: (() => void) | null = null;
   public close = jest.fn();
+  private detachedListeners = new Map<string, Listener[]>();
   public removeAllEventListeners = jest.fn(() => {
+    this.detachedListeners = new Map(
+      [...this.listeners.entries()].map(([type, listeners]) => [type, [...listeners]]),
+    );
     this.listeners.clear();
   });
   private readonly listeners = new Map<string, Listener[]>();
@@ -78,7 +84,14 @@ class MockEventSource {
   }
 
   emit(type: string, payload: unknown, lastEventId?: string) {
-    const listeners = this.listeners.get(type) ?? [];
+    this.emitToListeners(this.listeners.get(type) ?? [], payload, lastEventId);
+  }
+
+  emitAfterClose(type: string, payload: unknown, lastEventId?: string) {
+    this.emitToListeners(this.detachedListeners.get(type) ?? [], payload, lastEventId);
+  }
+
+  private emitToListeners(listeners: Listener[], payload: unknown, lastEventId?: string) {
     const event = {
       data: typeof payload === 'string' ? payload : JSON.stringify(payload),
       lastEventId,
@@ -106,6 +119,7 @@ const mockedFetchRouteCandidates = jest.mocked(fetchRouteCandidates);
 const mockedGetCurrentAccessTokenForTransport = jest.mocked(getCurrentAccessTokenForTransport);
 const mockedStartTripTracking = jest.mocked(startTripTracking);
 const mockedSendTripPosition = jest.mocked(sendTripPosition);
+const mockedSetTripAppState = jest.mocked(setTripAppState);
 
 const route: MobilityRoutePayload = {
   id: 'route-1',
@@ -149,6 +163,7 @@ describe('useTripTracking failure-case verification', () => {
       bufferMinutes: 7,
       targetArrivalTime: '2026-05-27T09:00:00.000Z',
     });
+    mockedSetTripAppState.mockResolvedValue({ tripId: 'trip-1', appState: 'foreground' });
     mockedSendTripPosition.mockResolvedValue({
       currentSegmentIndex: 0,
       progress: 0.1,
@@ -192,6 +207,7 @@ describe('useTripTracking failure-case verification', () => {
     await settle();
 
     expect(MockEventSource.instances).toHaveLength(1);
+    expect(mockedSetTripAppState).toHaveBeenCalledWith('trip-1', 'foreground');
     await act(async () => {
       MockEventSource.instances[0].emit('open', {});
       await flushMicrotask();
@@ -287,6 +303,13 @@ describe('useTripTracking failure-case verification', () => {
     expect(MockEventSource.instances).toHaveLength(2);
     expect(MockEventSource.instances[0].init?.headers?.Authorization).toBe('Bearer access-token-1');
     expect(MockEventSource.instances[1].init?.headers?.Authorization).toBe('Bearer access-token-2');
+    await act(async () => {
+      MockEventSource.instances[0].emitAfterClose('STATUS_CHANGED', {
+        routeSummary: { status: '긴급' },
+      });
+      await flushMicrotask();
+    });
+    expect(stateRef.current?.status).not.toBe('긴급');
     await act(async () => {
       renderer!.unmount();
     });
@@ -405,6 +428,96 @@ describe('useTripTracking failure-case verification', () => {
     });
 
     expect(stateRef.current?.status).not.toBe('긴급');
+    await act(async () => {
+      renderer!.unmount();
+    });
+  });
+
+  it('applies a realtime route snapshot update from SSE', async () => {
+    const getCurrentPosition = jest.fn().mockResolvedValue({ lat: 37.5, lng: 127.0 });
+    const stateRef: { current: ReturnType<typeof useTripTracking> | null } = { current: null };
+
+    function Harness() {
+      stateRef.current = useTripTracking({
+        origin: { name: '출발', lat: 37.5, lng: 127.0 },
+        destination: { name: '도착', lat: 37.6, lng: 127.1 },
+        targetArrivalTime: '2026-05-27T09:00:00.000Z',
+        getCurrentPosition,
+      });
+      return null;
+    }
+
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(<Harness />, { unstable_isConcurrent: false } as never);
+      await flushMicrotask();
+    });
+    await act(async () => {
+      await stateRef.current!.start();
+      await flushMicrotask();
+    });
+
+    expect(stateRef.current?.isRerouting).toBe(false);
+    await act(async () => {
+      MockEventSource.instances[0].emit('REROUTED', {
+        timestamp: '2026-05-27T08:01:00.000Z',
+        newRoute: { ...route, id: 'route-rerouted' },
+      });
+      await flushMicrotask();
+    });
+    expect(stateRef.current?.isRerouting).toBe(true);
+
+    const updatedRoute = { ...route, id: 'route-2', name: '실시간 갱신 경로' };
+    await act(async () => {
+      MockEventSource.instances[0].emit('ROUTE_UPDATED', { route: updatedRoute });
+      await flushMicrotask();
+    });
+
+    expect(stateRef.current?.route).toEqual(updatedRoute);
+    await act(async () => {
+      renderer!.unmount();
+    });
+  });
+
+  it('ignores an older SSE route snapshot after a newer one was applied', async () => {
+    const getCurrentPosition = jest.fn().mockResolvedValue({ lat: 37.5, lng: 127.0 });
+    const stateRef: { current: ReturnType<typeof useTripTracking> | null } = { current: null };
+
+    function Harness() {
+      stateRef.current = useTripTracking({
+        origin: { name: '출발', lat: 37.5, lng: 127.0 },
+        destination: { name: '도착', lat: 37.6, lng: 127.1 },
+        targetArrivalTime: '2026-05-27T09:00:00.000Z',
+        getCurrentPosition,
+      });
+      return null;
+    }
+
+    let renderer: TestRenderer.ReactTestRenderer;
+    await act(async () => {
+      renderer = TestRenderer.create(<Harness />, { unstable_isConcurrent: false } as never);
+      await flushMicrotask();
+    });
+    await act(async () => {
+      await stateRef.current!.start();
+      await flushMicrotask();
+    });
+
+    const newerRoute = { ...route, id: 'route-new', name: '최신 경로' };
+    const olderRoute = { ...route, id: 'route-old', name: '오래된 경로' };
+    await act(async () => {
+      MockEventSource.instances[0].emit('ROUTE_UPDATED', {
+        timestamp: '2026-05-27T08:01:00.000Z',
+        route: newerRoute,
+      });
+      MockEventSource.instances[0].emit('ROUTE_UPDATED', {
+        timestamp: '2026-05-27T08:00:00.000Z',
+        route: olderRoute,
+      });
+      await flushMicrotask();
+    });
+
+    expect(stateRef.current?.route).toEqual(newerRoute);
     await act(async () => {
       renderer!.unmount();
     });

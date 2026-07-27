@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { usePathname, useRouter } from 'expo-router';
+import * as Linking from 'expo-linking';
 import { useAuth } from '../features/auth/context';
 import {
   clearStoredActiveTripId,
@@ -14,7 +15,36 @@ export function AppNavigationCoordinator() {
   const { isAuthHydrating, isLoggedIn } = useAuth();
   const inFlightKeyRef = useRef<string | null>(null);
 
+  const isDevelopmentRoute = __DEV__ && pathname.startsWith('/dev/');
+
   useEffect(() => {
+    if (!__DEV__) {
+      return;
+    }
+
+    const navigateToDevelopmentRoute = (url: string) => {
+      const parsed = Linking.parse(url);
+      const developmentPath = parsed.hostname === 'dev' && parsed.path ? `/dev/${parsed.path.replace(/^\//, '')}` : parsed.path;
+      if (developmentPath?.startsWith('/dev/')) {
+        router.push(developmentPath as never);
+      }
+    };
+
+    const subscription = Linking.addEventListener('url', ({ url }) => navigateToDevelopmentRoute(url));
+    void Linking.getInitialURL().then((url) => {
+      if (url) {
+        navigateToDevelopmentRoute(url);
+      }
+    });
+
+    return () => subscription.remove();
+  }, [router]);
+
+  useEffect(() => {
+    if (isDevelopmentRoute) {
+      return;
+    }
+
     const key = `${isAuthHydrating}:${isLoggedIn}:${pathname}`;
     if (inFlightKeyRef.current === key) {
       return;
@@ -71,7 +101,7 @@ export function AppNavigationCoordinator() {
     return () => {
       cancelled = true;
     };
-  }, [isAuthHydrating, isLoggedIn, pathname, router]);
+  }, [isAuthHydrating, isLoggedIn, isDevelopmentRoute, pathname, router]);
 
   return null;
 }

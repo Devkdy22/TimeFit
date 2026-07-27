@@ -3,6 +3,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import type { LiveSheetProps } from './types';
 import { statusPrimary, statusTone, stripPlusDuration } from './ui';
+import { typographyPresets } from '../../../../theme/typography';
 
 export function CurrentSegmentCard({ data }: { data: LiveSheetProps }) {
   const current = data.detailLines.find((line) => line.isCurrent) ?? data.detailLines[0];
@@ -48,11 +49,11 @@ const styles = StyleSheet.create({
     gap: 7,
   },
   topRow: { flexDirection: 'row', alignItems: 'center' },
-  label: { fontFamily: 'Pretendard-SemiBold', fontSize: 13, color: '#64748B' },
-  title: { fontFamily: 'Pretendard-ExtraBold', fontSize: 23, color: '#0F172A', letterSpacing: -0.25 },
-  route: { fontFamily: 'Pretendard-SemiBold', fontSize: 14, color: '#334155', lineHeight: 20 },
-  action: { fontFamily: 'Pretendard-Medium', fontSize: 13, color: '#64748B' },
-  eta: { fontFamily: 'Pretendard-Bold', fontSize: 18, letterSpacing: -0.2 },
+  label: { ...typographyPresets.label, color: '#64748B' },
+  title: { ...typographyPresets.sectionTitle, color: '#0F172A', letterSpacing: -0.25 },
+  route: { ...typographyPresets.bodyEmphasis, color: '#334155' },
+  action: { ...typographyPresets.caption.md, color: '#64748B' },
+  eta: { ...typographyPresets.cardTitle, letterSpacing: -0.2 },
   statusChip: {
     marginLeft: 'auto',
     paddingHorizontal: 10,
@@ -60,5 +61,5 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     borderWidth: 1,
   },
-  statusChipText: { fontFamily: 'Pretendard-SemiBold', fontSize: 12 },
+  statusChipText: { ...typographyPresets.label },
 });

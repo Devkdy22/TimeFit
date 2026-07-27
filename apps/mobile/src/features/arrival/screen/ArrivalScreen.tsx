@@ -1,7 +1,8 @@
 import { Ionicons } from '@expo/vector-icons';
 import { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import { AppScreen, Header, InfoCard, PrimaryButton, SecondaryButton, TimeyMascot } from '../../../components/app';
+import { AppScreen, Header, InfoCard, PrimaryButton, SecondaryButton } from '../../../components/app';
+import { TimeyStage } from '../../../components/timey';
 import { useAuth } from '../../auth/context';
 import type { ArrivalSummary } from '../model/types';
 import { appColors, appTypography } from '../../../theme/app-tokens';
@@ -57,7 +58,7 @@ export function ArrivalScreen() {
         </View>
         <Text style={styles.heroTitle}>도착 완료!</Text>
         <Text style={styles.heroSubtitle}>예정 시간에 맞춰 도착했어요.</Text>
-        <TimeyMascot size={92} expression="smile" />
+        <TimeyStage variant="success" state="success" animated glow animationMode="static" renderStyle="soft3d" />
       </View>
 
       {arrivalSummary ? (

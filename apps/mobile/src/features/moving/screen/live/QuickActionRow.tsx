@@ -2,12 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 
-export function QuickActionRow() {
+interface Props {
+  onRefreshPosition?: () => void;
+  onReroute?: () => void;
+}
+
+export function QuickActionRow({ onRefreshPosition, onReroute }: Props) {
   const actions = [
-    { icon: 'locate-outline', label: '위치 재보정' },
-    { icon: 'refresh-outline', label: '경로 재탐색' },
-    { icon: 'share-social-outline', label: '공유' },
-    { icon: 'alert-circle-outline', label: '신고' },
+    { icon: 'locate-outline', label: '위치 재보정', onPress: onRefreshPosition },
+    { icon: 'refresh-outline', label: '경로 재탐색', onPress: onReroute },
   ] as const;
 
   return (
@@ -15,7 +18,7 @@ export function QuickActionRow() {
       <Text style={styles.sectionTitle}>빠른 액션</Text>
       <View style={styles.row}>
         {actions.map((a) => (
-          <Pressable key={a.label} style={styles.item}>
+          <Pressable key={a.label} onPress={a.onPress} style={styles.item}>
             <View style={styles.icon}>
               <Ionicons name={a.icon} size={18} color="#334155" />
             </View>

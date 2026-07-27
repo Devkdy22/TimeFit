@@ -1,18 +1,24 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-export function TransitBottomActions() {
+interface Props {
+  onReroute?: () => void;
+  onRefreshPosition?: () => void;
+  onStop?: () => void;
+}
+
+export function TransitBottomActions({ onReroute, onRefreshPosition, onStop }: Props) {
   return (
     <View style={styles.row}>
-      <Pressable style={({ pressed }) => [styles.btn, pressed ? styles.btnPressed : null]}>
+      <Pressable onPress={onReroute} style={({ pressed }) => [styles.btn, pressed ? styles.btnPressed : null]}>
         <Ionicons name="refresh-outline" size={15} color="#0E2C2C" />
         <Text style={styles.label}>경로 재탐색</Text>
       </Pressable>
-      <Pressable style={({ pressed }) => [styles.btn, pressed ? styles.btnPressed : null]}>
+      <Pressable onPress={onRefreshPosition} style={({ pressed }) => [styles.btn, pressed ? styles.btnPressed : null]}>
         <Ionicons name="locate-outline" size={15} color="#334155" />
         <Text style={styles.label}>위치 재보정</Text>
       </Pressable>
-      <Pressable style={({ pressed }) => [styles.btn, pressed ? styles.btnDangerPressed : null]}>
+      <Pressable onPress={onStop} style={({ pressed }) => [styles.btn, pressed ? styles.btnDangerPressed : null]}>
         <Ionicons name="close-circle-outline" size={15} color="#DC2626" />
         <Text style={styles.destructiveText}>이동 종료</Text>
       </Pressable>
