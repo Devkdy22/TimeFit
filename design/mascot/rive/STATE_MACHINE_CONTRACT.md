@@ -2,7 +2,7 @@
 
 ## State Machine
 - Name: `TimeyStateMachine`
-- Export path: `/Users/kimdoyeon/Dev/TimeFit/apps/mobile/assets/animations/timey/timey.riv`
+- Export path: `/Users/kimdoyeon/Dev/TimeFit/apps/mobile/assets/animations/timey/timey_state_machine.riv`
 
 ## Inputs (must match app code exactly)
 1. `stateNumber` (Number)

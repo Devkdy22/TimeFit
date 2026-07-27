@@ -1,5 +1,6 @@
 import { Animated } from 'react-native';
-import Svg, { Ellipse, G, Path } from 'react-native-svg';
+import Reanimated from 'react-native-reanimated';
+import Svg, { Ellipse, G, Path, type GProps } from 'react-native-svg';
 import type { TimiTone } from './Timi';
 import {
   TIMI_PART_DEFAULT_TRANSFORMS,
@@ -9,6 +10,12 @@ import {
 } from './TimiModel';
 
 export const AnimatedG = Animated.createAnimatedComponent(G);
+export const ReanimatedG = Reanimated.createAnimatedComponent(G);
+
+export type TimiAnimatedGroupProps = Partial<GProps> & {
+  /** Fabric RNSVGGroup accepts matrix as the native animated transform prop. */
+  matrix?: readonly number[];
+};
 
 interface TimiPalette {
   body: string;
@@ -45,6 +52,7 @@ export interface TimiBaseProps {
   faceFocusX?: number;
   faceFocusY?: number;
   showShadow?: boolean;
+  rightArmAnimatedProps?: TimiAnimatedGroupProps;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -157,16 +165,16 @@ function markerCenter(
 function mouthPathByExpression(expression: TimiExpression): string {
   switch (expression) {
     case 'question':
-      return 'M50 55 C54 58 66 58 70 55';
+      return 'M44 55 C52 61 68 61 76 55';
     case 'focus':
-      return 'M50 55 L70 55';
+      return 'M44 55 L76 55';
     case 'smile':
-      return 'M50 53 C54 60 66 60 70 53';
+      return 'M44 53 C52 63 68 63 76 53';
     case 'concerned':
-      return 'M50 58 C54 52 66 52 70 58';
+      return 'M44 58 C52 49 68 49 76 58';
     case 'neutral':
     default:
-      return 'M50 55 C55 56 65 56 70 55';
+      return 'M44 55 C52 59 68 59 76 55';
   }
 }
 
@@ -206,16 +214,23 @@ export function RightArmPart({
   palette,
   rotateDeg,
   translateY,
+  animatedProps,
 }: {
   palette: TimiPalette;
   rotateDeg: number;
   translateY: number;
+  animatedProps?: TimiAnimatedGroupProps;
 }) {
   const { x, y } = TIMI_TRANSFORM_ORIGIN.rightArm;
+  const ArmGroup = animatedProps ? ReanimatedG : G;
   return (
-    <G id="rightArm" transform={`translate(0 ${translateY}) rotate(${rotateDeg} ${x} ${y})`}>
+    <ArmGroup
+      id="rightArm"
+      {...(animatedProps ? { animatedProps } : {})}
+      transform={animatedProps ? undefined : `translate(0 ${translateY}) rotate(${rotateDeg} ${x} ${y})`}
+    >
       <Ellipse cx="96" cy="55" rx="7.5" ry="5.5" fill={palette.body} />
-    </G>
+    </ArmGroup>
   );
 }
 
@@ -240,7 +255,7 @@ export function MouthPart({ expression }: { expression: TimiExpression }) {
       <Path
         d={mouthPathByExpression(expression)}
         stroke="#1F2A44"
-        strokeWidth="3"
+        strokeWidth="4.2"
         strokeLinecap="round"
       />
     </G>
@@ -332,6 +347,7 @@ export function TimiBase({
   faceFocusX = 0,
   faceFocusY = 0,
   showShadow = true,
+  rightArmAnimatedProps,
 }: TimiBaseProps) {
   const palette = PALETTE_BY_TONE[tone];
   const next = {
@@ -350,6 +366,7 @@ export function TimiBase({
         palette={palette}
         rotateDeg={next.rightArmRotateDeg}
         translateY={next.rightArmTranslateY}
+        animatedProps={rightArmAnimatedProps}
       />
       <HeadPart
         palette={palette}

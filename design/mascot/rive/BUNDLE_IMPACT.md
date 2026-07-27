@@ -6,11 +6,12 @@
 ## Policy
 - Default runtime mode on heavy live surfaces (`TransitView`) is `static`.
 - `Rive` is enabled for onboarding or dedicated mascot surfaces.
-- `soft3d` assets remain optional and feature-flagged off for core runtime.
+- `soft3d` is the validated default for core mascot surfaces; `EXPO_PUBLIC_ENABLE_SOFT_3D=false` remains the explicit low-end/staged-rollout fallback.
 
 ## Runtime/Binary Considerations
 - `rive-react-native` introduces native/runtime overhead versus static SVG render.
 - `.riv` asset adds bundle payload; large multi-artboard files should be avoided.
+- The four production 2.5D PNG states are kept under a combined 2 MiB budget; `pnpm validate:timey` reports the current total.
 - Frequent Rive-driven state updates can increase main-thread and bridge pressure if used on high-frequency screens.
 
 ## Current Mitigations
@@ -25,8 +26,8 @@
 - Trigger policy:
   - trigger inputs fire only on enter transitions (`success`, `offroute`, `rerouting`)
 - soft3d isolation:
-  - runtime feature flag defaults to off
   - `Timey.tsx` lazily requires `Timey3DAvatar` only when `renderStyle=soft3d` and feature enabled
+  - the runtime flag defaults to on only for the bundled 2.5D assets; setting it to false keeps the flat SVG path
 
 ## Measurement Checklist
 - Compare app startup and first-screen render time with/without Rive.
@@ -40,4 +41,4 @@
   - iPhone notch devices
   - Android mid/low tier devices
 - Keep `enableRive=false` as rollout default until `.riv` asset QA is complete.
-- Keep soft3d assets preview/marketing-only; exclude from core runtime surfaces.
+- Keep live Rive disabled until profiling and valid `.riv` QA are complete; the bundled 2.5D path is the production-safe core runtime surface.

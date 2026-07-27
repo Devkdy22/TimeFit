@@ -2,8 +2,8 @@ import type { TimeyContext, TimeyState } from './timeyTypes';
 
 export function resolveTimeyStateMachine(context: TimeyContext): TimeyState {
   if (context.tripStatus === 'ARRIVED') return 'success';
-  if (context.isOffRoute === true) return 'offroute';
   if (context.isRerouting === true) return 'rerouting';
+  if (context.isOffRoute === true) return 'offroute';
   if (context.delayRiskLevel === 'HIGH') return 'panic';
 
   if (typeof context.delayMinutes === 'number' && context.delayMinutes > 0) {
@@ -14,6 +14,8 @@ export function resolveTimeyStateMachine(context: TimeyContext): TimeyState {
   if (typeof context.bufferMinutes === 'number' && context.bufferMinutes <= 3) return 'warning';
 
   if (context.isSearching) return 'searching';
+
+  if (context.isTransfer === true) return 'transfer';
 
   if (context.currentMode === 'WALK') return 'walking';
   if (context.currentMode === 'BUS') return 'riding_bus';

@@ -27,26 +27,27 @@ function BaseTimey({ animated = true, animationMode = 'auto', renderStyle = 'fla
   const riveAllowed = TIMEY_FEATURES.enableRive;
   const soft3dAllowed = TIMEY_FEATURES.enableSoft3D;
   const effectiveAnimationMode = reduceMotionEnabled ? 'static' : animationMode;
+  const effectiveAnimated = animated && !reduceMotionEnabled;
   const wantsRive = effectiveAnimationMode === 'rive' || (effectiveAnimationMode === 'auto' && riveAllowed);
   const wantsSoft3d = renderStyle === 'soft3d' && soft3dAllowed;
 
   if (wantsRive) {
-    return <TimeyRive {...props} animated={animated} renderStyle={renderStyle} />;
+    return <TimeyRive {...props} animated={effectiveAnimated} renderStyle={renderStyle} />;
   }
 
   if (wantsSoft3d) {
     // Lazy-load 3D renderer only when explicitly requested and feature-enabled.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { Timey3DAvatar } = require('./Timey3DAvatar') as typeof import('./Timey3DAvatar');
-    return <Timey3DAvatar {...props} animated={animated} />;
+    return <Timey3DAvatar {...props} animated={effectiveAnimated} />;
   }
 
   if (effectiveAnimationMode === 'static') {
-    return <TimeyAvatar {...props} animated={animated} renderStyle="flat" />;
+    return <TimeyAvatar {...props} animated={effectiveAnimated} renderStyle="flat" />;
   }
 
   if (animated) {
-    return <TimeyAvatar {...props} animated renderStyle="flat" />;
+    return <TimeyAvatar {...props} animated={effectiveAnimated} renderStyle="flat" />;
   }
 
   return <TimeyAvatar {...props} animated={false} renderStyle="flat" />;

@@ -1,6 +1,7 @@
 import { memo, useEffect, useMemo, useRef, useState, type Ref } from 'react';
 import { AccessibilityInfo, View } from 'react-native';
 import type { TimeyProps, TimeyState } from '../../types/timey.types';
+import { resolveRiveRuntimeEnabled } from '../../config/features';
 import { getTimeyAccessibilityLabel } from './TimeyController';
 import { TimeyAvatar } from './TimeyAvatar';
 import {
@@ -25,9 +26,13 @@ interface RiveRefLike {
 }
 
 const TIMEY_RIVE_CONTRACT = {
-  file: 'apps/mobile/assets/animations/timey/timey.riv',
+  file: 'apps/mobile/assets/animations/timey/timey_state_machine.riv',
   stateMachineName: 'TimeyStateMachine',
 } as const;
+const TIMEY_RIVE_RUNTIME_ENABLED = resolveRiveRuntimeEnabled(
+  process.env.EXPO_PUBLIC_TIMEY_RIVE_ENABLED,
+  process.env.EXPO_PUBLIC_TIMEY_RIVE_ASSET_READY,
+);
 
 type RuntimeCache = {
   checked: boolean;
@@ -46,7 +51,12 @@ const warnedStatuses = new Set<TimeyRiveStatus>();
 function warnOnce(status: TimeyRiveStatus) {
   if (status === 'ready' || warnedStatuses.has(status)) return;
   warnedStatuses.add(status);
-  const reason = status === 'missing-library' ? 'rive-react-native not installed' : 'timey.riv missing/unresolved';
+  const reason =
+    status === 'disabled'
+      ? 'EXPO_PUBLIC_TIMEY_RIVE_ENABLED and EXPO_PUBLIC_TIMEY_RIVE_ASSET_READY are not both true'
+      : status === 'missing-library'
+        ? 'rive-react-native not installed'
+        : 'timey_state_machine.riv missing/unresolved';
   console.warn(`[TimeyRive] Falling back to static SVG (${reason})`);
 }
 
@@ -61,16 +71,17 @@ function ensureRuntime() {
   }
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    runtimeCache.moduleRef = require('../../../assets/animations/timey/timey.riv');
+    runtimeCache.moduleRef = require('../../../assets/animations/timey/timey_state_machine.riv');
   } catch {
     runtimeCache.moduleRef = null;
   }
   return runtimeCache;
 }
 
-export type TimeyRiveStatus = 'ready' | 'missing-library' | 'missing-file';
+export type TimeyRiveStatus = 'ready' | 'disabled' | 'missing-library' | 'missing-file';
 
 export function getTimeyRiveStatus(): TimeyRiveStatus {
+  if (!TIMEY_RIVE_RUNTIME_ENABLED) return 'disabled';
   const runtime = ensureRuntime();
   if (!runtime.component) return 'missing-library';
   if (!runtime.moduleRef) return 'missing-file';

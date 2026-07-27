@@ -22,6 +22,7 @@ export interface TimeyContext {
   delayRiskLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
   isOffRoute?: boolean;
   isRerouting?: boolean;
+  isTransfer?: boolean;
   currentMode?: 'WALK' | 'BUS' | 'SUBWAY';
   nextDepartureMinutes?: number | null;
   hasRealtime?: boolean;

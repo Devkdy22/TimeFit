@@ -10,6 +10,7 @@ interface TripTrackingLike {
     delayRiskLevel?: 'LOW' | 'MEDIUM' | 'HIGH';
     mobilitySegments?: Array<{
       mode: 'walk' | 'bus' | 'subway' | 'car';
+      transferTip?: string;
       realtimeInfo?: { etaMinutes?: number };
     }>;
   } | null;
@@ -17,6 +18,7 @@ interface TripTrackingLike {
     accuracy?: number;
   } | null;
   isConnectingSse?: boolean;
+  isRerouting?: boolean;
 }
 
 interface SelectTripInput {
@@ -35,7 +37,16 @@ function toCurrentMode(mode: 'walk' | 'bus' | 'subway' | 'car' | undefined): Tim
 
 export function selectTimeyContextFromTrip(input: SelectTripInput): TimeyContext {
   const currentSegmentIndex = input.trip.movement?.currentSegmentIndex ?? 0;
-  const segment = input.trip.route?.mobilitySegments?.[currentSegmentIndex];
+  const segments = input.trip.route?.mobilitySegments ?? [];
+  const segment = segments[currentSegmentIndex];
+  const previousSegment = segments[currentSegmentIndex - 1];
+  const nextSegment = segments[currentSegmentIndex + 1];
+  const isTransit = (mode?: 'walk' | 'bus' | 'subway' | 'car') => mode === 'bus' || mode === 'subway';
+  const isTransfer = Boolean(segment?.transferTip) || (
+    segment?.mode === 'walk' &&
+    isTransit(previousSegment?.mode) &&
+    isTransit(nextSegment?.mode)
+  );
 
   return {
     tripStatus: input.tripStatus,
@@ -43,7 +54,8 @@ export function selectTimeyContextFromTrip(input: SelectTripInput): TimeyContext
     delayMinutes: input.delayMinutes,
     delayRiskLevel: input.trip.route?.delayRiskLevel,
     isOffRoute: input.trip.movement?.isOffRoute === true,
-    isRerouting: input.trip.isConnectingSse === true,
+    isRerouting: input.trip.isRerouting === true,
+    isTransfer,
     currentMode: toCurrentMode(segment?.mode),
     nextDepartureMinutes: segment?.realtimeInfo?.etaMinutes ?? null,
     hasRealtime: input.trip.isConnectingSse === false,

@@ -133,7 +133,7 @@
   </g>
 
   <g id="mouthNeutral" opacity="1">
-    <path d="M483 585C490 598 501 605 512 605C523 605 534 598 541 585" stroke="#1F2A44" stroke-width="12" stroke-linecap="round"/>
+    <path d="M474 585C484 600 499 609 512 609C525 609 540 600 550 585" stroke="#1F2A44" stroke-width="14" stroke-linecap="round"/>
   </g>
   <g id="mouthSmile" opacity="0">
     <path d="M474 580C484 602 498 614 512 614C526 614 540 602 550 580" stroke="#1F2A44" stroke-width="13" stroke-linecap="round"/>

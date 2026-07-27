@@ -1,4 +1,4 @@
-import { TimiBase } from './TimiBase';
+import { TimiBase, type TimiAnimatedGroupProps } from './TimiBase';
 import type { TimiExpression, TimiPartTransforms } from './TimiModel';
 
 export type TimiTone = 'mint' | 'orange' | 'red';
@@ -20,6 +20,7 @@ export interface TimiProps {
   faceFocusX?: number;
   faceFocusY?: number;
   showShadow?: boolean;
+  rightArmAnimatedProps?: TimiAnimatedGroupProps;
 }
 
 export function Timi({
@@ -39,6 +40,7 @@ export function Timi({
   faceFocusX = 0,
   faceFocusY = 0,
   showShadow = true,
+  rightArmAnimatedProps,
 }: TimiProps) {
   const transforms: Partial<TimiPartTransforms> = {
     eyesScaleY: blink,
@@ -62,6 +64,7 @@ export function Timi({
       faceFocusX={faceFocusX}
       faceFocusY={faceFocusY}
       showShadow={showShadow}
+      rightArmAnimatedProps={rightArmAnimatedProps}
     />
   );
 }

@@ -18,6 +18,10 @@ export type TimeyProps = {
   riveDebugTriggerNonce?: number;
   glow?: boolean;
   accessibilityLabel?: string;
+  /** Home-only, one-shot fallback arm greeting. */
+  greeting?: boolean;
+  /** Increment to replay a greeting in a development fixture. */
+  greetingReplayNonce?: number;
 };
 
 export type TimeyControllerInput = TimeyContext;

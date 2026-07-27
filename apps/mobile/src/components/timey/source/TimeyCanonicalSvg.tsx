@@ -1,5 +1,6 @@
 import { memo } from 'react';
 import { Timi } from '../../character/Timi';
+import type { TimiAnimatedGroupProps } from '../../character/TimiBase';
 import type { TimeyState } from '../../../domain/timey/timeyTypes';
 
 function mapExpression(state: TimeyState): 'neutral' | 'question' | 'focus' | 'smile' | 'concerned' {
@@ -37,10 +38,14 @@ function mapTone(state: TimeyState): 'mint' | 'orange' | 'red' {
 interface Props {
   state: TimeyState;
   size: number;
+  blink?: number;
+  headRotateDeg?: number;
+  bodyTranslateY?: number;
+  rightArmAnimatedProps?: TimiAnimatedGroupProps;
 }
 
-function BaseTimeyCanonicalSvg({ state, size }: Props) {
-  return <Timi size={size} expression={mapExpression(state)} tone={mapTone(state)} />;
+function BaseTimeyCanonicalSvg({ state, size, blink = 1, headRotateDeg = 0, bodyTranslateY = 0, rightArmAnimatedProps }: Props) {
+  return <Timi size={size} expression={mapExpression(state)} tone={mapTone(state)} blink={blink} headRotateDeg={headRotateDeg} bodyTranslateY={bodyTranslateY} rightArmAnimatedProps={rightArmAnimatedProps} />;
 }
 
 export const TimeyCanonicalSvg = memo(BaseTimeyCanonicalSvg);

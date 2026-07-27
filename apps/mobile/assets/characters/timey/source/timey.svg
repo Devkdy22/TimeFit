@@ -12,5 +12,5 @@
   <rect x="34.5455" y="53.4776" width="2.08955" height="9.54545" rx="1.04478" transform="rotate(90 34.5455 53.4776)" fill="#6ED6CD"/>
   <ellipse cx="48" cy="46" rx="3" ry="4" fill="#1F2A44"/>
   <ellipse cx="72" cy="46" rx="3" ry="4" fill="#1F2A44"/>
-  <rect x="50" y="53" width="20" height="4" rx="2" fill="#1F2A44"/>
+  <rect x="46" y="52" width="28" height="6" rx="3" fill="#1F2A44"/>
 </svg>

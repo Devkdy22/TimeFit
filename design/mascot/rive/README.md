@@ -42,7 +42,7 @@
 - late
 
 ## State Machine Contract
-- File: `apps/mobile/assets/animations/timey/timey.riv`
+- File: `apps/mobile/assets/animations/timey/timey_state_machine.riv`
 - State Machine: `TimeyStateMachine`
 - Inputs:
   - `stateNumber` (Number)
@@ -71,7 +71,7 @@
 
 ## Export
 - Export `.riv` to:
-  - `apps/mobile/assets/animations/timey/timey.riv`
+  - `apps/mobile/assets/animations/timey/timey_state_machine.riv`
 
 ## Runtime Policy
 - Rive is intended for onboarding and dedicated mascot surfaces.

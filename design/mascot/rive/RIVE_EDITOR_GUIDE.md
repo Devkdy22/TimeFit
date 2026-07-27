@@ -18,4 +18,4 @@
 - check `stateNumber` values `0,1,8,9,12,13`
 - fire each trigger once and verify one-shot behavior
 16. Export to:
-- `/Users/kimdoyeon/Dev/TimeFit/apps/mobile/assets/animations/timey/timey.riv`
+- `/Users/kimdoyeon/Dev/TimeFit/apps/mobile/assets/animations/timey/timey_state_machine.riv`

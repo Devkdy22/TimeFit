@@ -1,13 +1,20 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useRouter } from 'expo-router';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Timey } from '../../src/components/timey';
+import { Timey, TimeyStage } from '../../src/components/timey';
 import type { TimeyAnimationMode } from '../../src/types/timey.types';
 import type { TimeyState } from '../../src/domain/timey/timeyTypes';
 import { TIMEY_CANONICAL_SOURCE } from '../../src/components/timey/TimeyAvatar';
-import { TIMEY_3D_ASSET_PATHS, isTimey3DMissing } from '../../src/components/timey/Timey3DAvatar';
+import { TIMEY_3D_ASSET_PATHS, TIMEY_3D_ASSET_VARIANTS, isTimey3DMissing } from '../../src/components/timey/Timey3DAvatar';
+import { TIMEY_3D_BLINK_MODE } from '../../src/components/timey/timeyBlink';
 import { getTimeyRiveStatus } from '../../src/components/timey/TimeyRive';
 import { Timey3DAvatar } from '../../src/components/timey';
+import { TIMEY_FEATURES } from '../../src/config/features';
+import { getTimeyMotionProfile } from '../../src/components/timey/timeyDisplay';
+import { getTimeyStatusOverlay } from '../../src/components/timey/timeyOverlay';
+import { getTimeyBlinkTimerCreationCount } from '../../src/components/timey/timeyQaDiagnostics';
+import { canRunTimeyGreeting } from '../../src/components/timey/timeyGreeting';
 
 const ALL_STATES: TimeyState[] = [
   'idle',
@@ -25,6 +32,20 @@ const ALL_STATES: TimeyState[] = [
   'rerouting',
   'success',
   'late',
+];
+
+const QA_STATES: TimeyState[] = [
+  'idle',
+  'searching',
+  'walking',
+  'riding_bus',
+  'riding_subway',
+  'transfer',
+  'warning',
+  'urgent',
+  'rerouting',
+  'offroute',
+  'success',
 ];
 
 type PreviewSize = 'sm' | 'md' | 'lg';
@@ -84,6 +105,7 @@ function PickerRow<T extends string>({
 }
 
 export default function TimeyPreviewScreen() {
+  const router = useRouter();
   const [selectedState, setSelectedState] = useState<TimeyState>('idle');
   const [selectedSize, setSelectedSize] = useState<PreviewSize>('md');
   const [selectedMode, setSelectedMode] = useState<TimeyAnimationMode>('static');
@@ -93,9 +115,29 @@ export default function TimeyPreviewScreen() {
   const [riveIsMoving, setRiveIsMoving] = useState<boolean>(false);
   const [riveTriggerType, setRiveTriggerType] = useState<'success' | 'rerouting' | 'offroute' | undefined>(undefined);
   const [riveTriggerNonce, setRiveTriggerNonce] = useState<number>(0);
+  const [qaState, setQaState] = useState<TimeyState>('idle');
+  const [qaSequenceEnabled, setQaSequenceEnabled] = useState(false);
+  const [stageMountCount, setStageMountCount] = useState(0);
+  const [blinkTimerCount, setBlinkTimerCount] = useState(0);
+  const [greetingReplayNonce, setGreetingReplayNonce] = useState(0);
+  const qaSequenceIndex = useRef(0);
   const riveStatus = getTimeyRiveStatus();
   const missingFlatStates: TimeyState[] = [];
   const missingSoft3dStates = ALL_STATES.filter((state) => !TIMEY_3D_ASSET_PATHS[state]);
+
+  useEffect(() => {
+    if (!qaSequenceEnabled) return;
+    const timer = setInterval(() => {
+      qaSequenceIndex.current = (qaSequenceIndex.current + 1) % QA_STATES.length;
+      setQaState(QA_STATES[qaSequenceIndex.current]);
+    }, 1100);
+    return () => clearInterval(timer);
+  }, [qaSequenceEnabled]);
+
+  useEffect(() => {
+    const timer = setInterval(() => setBlinkTimerCount(getTimeyBlinkTimerCreationCount()), 500);
+    return () => clearInterval(timer);
+  }, []);
 
   const selectedPreview = useMemo(
     () => (
@@ -118,6 +160,62 @@ export default function TimeyPreviewScreen() {
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>Timey Dev Preview</Text>
         <Text style={styles.subtitle}>TransitView 연결 전 상태 표현 QA</Text>
+
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Android State Fixture</Text>
+          <Text style={styles.pathText}>개발 전용: timefit://dev/timey-preview</Text>
+          <Pressable onPress={() => router.push('/dev/home-timey-preview' as never)} style={styles.sequenceButton}>
+            <Text style={styles.sequenceButtonText}>HomeContainer 경로 QA 열기</Text>
+          </Pressable>
+          <TimeyStage
+            variant="route"
+            state={qaState}
+            animated
+            glow
+            animationMode="static"
+            renderStyle="flat"
+            greeting={canRunTimeyGreeting(qaState)}
+            greetingReplayNonce={greetingReplayNonce}
+            onStageMount={() => setStageMountCount((count) => count + 1)}
+          />
+          <Text style={styles.stateText}>active state: {qaState}</Text>
+          <Text style={styles.pathText}>Stage mounts: {stageMountCount} (상태 변경 중 1 유지가 기준)</Text>
+          <Text style={styles.pathText}>asset: {TIMEY_3D_ASSET_VARIANTS[qaState].asset}</Text>
+          <Text style={styles.pathText}>pose: {TIMEY_3D_ASSET_VARIANTS[qaState].poseVariant} / color variant: {TIMEY_3D_ASSET_VARIANTS[qaState].colorVariant} / alternate: {TIMEY_3D_ASSET_VARIANTS[qaState].alternateColorAvailable ? 'available' : 'missing'}</Text>
+          <Text style={styles.pathText}>motion: {getTimeyMotionProfile(qaState).pattern}</Text>
+          <Text style={styles.pathText}>overlay: {getTimeyStatusOverlay(qaState)?.icon ?? 'none'}</Text>
+          <Text style={styles.pathText}>renderer: {TIMEY_FEATURES.enableSoft3D ? 'soft3d-fallback-capable' : 'canonical-svg'} / expression: {TIMEY_FEATURES.enableSoft3D ? TIMEY_3D_BLINK_MODE : 'eyesOpen/eyesClosed'} / blink effect setup: {blinkTimerCount}</Text>
+          <View style={styles.chipRow}>
+            {QA_STATES.map((state) => (
+              <Pressable
+                key={state}
+                onPress={() => {
+                  setQaSequenceEnabled(false);
+                  setQaState(state);
+                }}
+                style={[styles.chip, qaState === state ? styles.chipActive : null]}
+              >
+                <Text style={[styles.chipText, qaState === state ? styles.chipTextActive : null]}>{state}</Text>
+              </Pressable>
+            ))}
+          </View>
+          <Pressable onPress={() => setQaSequenceEnabled((enabled) => !enabled)} style={[styles.sequenceButton, qaSequenceEnabled ? styles.sequenceButtonActive : null]}>
+            <Text style={styles.sequenceButtonText}>{qaSequenceEnabled ? '연속 상태 전환 중지' : '빠른 상태 연속 전환 시작'}</Text>
+          </Pressable>
+          <Text style={styles.pathText}>blink: eye layer only / full renderer opacity·key 변경 없음</Text>
+          <Text style={styles.pathText}>greeting fixture: canonical SVG fallback / eligible: {canRunTimeyGreeting(qaState) ? 'yes' : 'no'} / replay: {greetingReplayNonce}</Text>
+          <Pressable
+            onPress={() => {
+              setQaSequenceEnabled(false);
+              setQaState('idle');
+              setGreetingReplayNonce((nonce) => nonce + 1);
+            }}
+            style={styles.sequenceButton}
+          >
+            <Text style={styles.sequenceButtonText}>Home idle greeting replay</Text>
+          </Pressable>
+          <Text style={styles.pathText}>Rive: {riveStatus}; invalid asset이면 canonical SVG/2.5D fallback</Text>
+        </View>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Interactive</Text>
@@ -372,6 +470,21 @@ const styles = StyleSheet.create({
   },
   chipTextActive: {
     color: '#CCFBF1',
+  },
+  sequenceButton: {
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#38BDF8',
+    paddingVertical: 10,
+  },
+  sequenceButtonActive: {
+    backgroundColor: '#38BDF8',
+  },
+  sequenceButtonText: {
+    color: '#E2E8F0',
+    fontSize: 12,
+    fontFamily: 'Pretendard-SemiBold',
   },
   previewRow: {
     flexDirection: 'row',

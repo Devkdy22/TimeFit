@@ -1,7 +1,7 @@
 # Timey Rive App QA Checklist
 
 ## Asset/Contract Integrity
-- [ ] `timey.riv` file exists at `/Users/kimdoyeon/Dev/TimeFit/apps/mobile/assets/animations/timey/timey.riv`
+- [ ] `timey_state_machine.riv` file exists at `/Users/kimdoyeon/Dev/TimeFit/apps/mobile/assets/animations/timey/timey_state_machine.riv`
 - [ ] File is not 0-byte
 - [ ] State machine name is exactly `TimeyStateMachine`
 - [ ] Input names exactly match:

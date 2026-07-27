@@ -1,26 +1,26 @@
-import test from 'node:test';
-import assert from 'node:assert/strict';
 import { resolveTimeyStateMachine } from '../timeyStateMachine';
 
 test('arrived has highest priority', () => {
   const state = resolveTimeyStateMachine({ tripStatus: 'ARRIVED', isOffRoute: true, delayRiskLevel: 'HIGH' });
-  assert.equal(state, 'success');
+  expect(state).toBe('success');
 });
 
 test('priority chain and mode states', () => {
-  assert.equal(resolveTimeyStateMachine({ isOffRoute: true }), 'offroute');
-  assert.equal(resolveTimeyStateMachine({ isRerouting: true }), 'rerouting');
-  assert.equal(resolveTimeyStateMachine({ delayRiskLevel: 'HIGH' }), 'panic');
-  assert.equal(resolveTimeyStateMachine({ bufferMinutes: -5 }), 'urgent');
-  assert.equal(resolveTimeyStateMachine({ bufferMinutes: 0 }), 'urgent');
-  assert.equal(resolveTimeyStateMachine({ bufferMinutes: 1 }), 'warning');
-  assert.equal(resolveTimeyStateMachine({ bufferMinutes: 3 }), 'warning');
-  assert.equal(resolveTimeyStateMachine({ bufferMinutes: 4 }), 'idle');
-  assert.equal(resolveTimeyStateMachine({ bufferMinutes: 5 }), 'idle');
-  assert.equal(resolveTimeyStateMachine({ bufferMinutes: 10 }), 'confident');
-  assert.equal(resolveTimeyStateMachine({ isSearching: true }), 'searching');
-  assert.equal(resolveTimeyStateMachine({ currentMode: 'WALK' }), 'walking');
-  assert.equal(resolveTimeyStateMachine({ currentMode: 'BUS' }), 'riding_bus');
-  assert.equal(resolveTimeyStateMachine({ currentMode: 'SUBWAY' }), 'riding_subway');
-  assert.equal(resolveTimeyStateMachine({ nextDepartureMinutes: 2 }), 'transfer');
+  expect(resolveTimeyStateMachine({ isOffRoute: true })).toBe('offroute');
+  expect(resolveTimeyStateMachine({ isRerouting: true })).toBe('rerouting');
+  expect(resolveTimeyStateMachine({ isOffRoute: true, isRerouting: true })).toBe('rerouting');
+  expect(resolveTimeyStateMachine({ delayRiskLevel: 'HIGH' })).toBe('panic');
+  expect(resolveTimeyStateMachine({ bufferMinutes: -5 })).toBe('urgent');
+  expect(resolveTimeyStateMachine({ bufferMinutes: 0 })).toBe('urgent');
+  expect(resolveTimeyStateMachine({ bufferMinutes: 1 })).toBe('warning');
+  expect(resolveTimeyStateMachine({ bufferMinutes: 3 })).toBe('warning');
+  expect(resolveTimeyStateMachine({ bufferMinutes: 4 })).toBe('idle');
+  expect(resolveTimeyStateMachine({ bufferMinutes: 5 })).toBe('idle');
+  expect(resolveTimeyStateMachine({ bufferMinutes: 10 })).toBe('confident');
+  expect(resolveTimeyStateMachine({ isSearching: true })).toBe('searching');
+  expect(resolveTimeyStateMachine({ currentMode: 'WALK' })).toBe('walking');
+  expect(resolveTimeyStateMachine({ currentMode: 'BUS' })).toBe('riding_bus');
+  expect(resolveTimeyStateMachine({ currentMode: 'SUBWAY' })).toBe('riding_subway');
+  expect(resolveTimeyStateMachine({ nextDepartureMinutes: 2 })).toBe('transfer');
+  expect(resolveTimeyStateMachine({ isTransfer: true, currentMode: 'WALK' })).toBe('transfer');
 });

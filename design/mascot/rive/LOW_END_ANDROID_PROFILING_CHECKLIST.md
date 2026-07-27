@@ -9,7 +9,8 @@
 - One mid-tier reference Android for comparison
 
 ## Build Matrix
-- `enableRive=false` (baseline)
+- `enableSoft3D=true`, `enableRive=false` (production 2.5D baseline)
+- `enableSoft3D=false`, `enableRive=false` (flat SVG low-end fallback)
 - `enableRive=true`, `enableLiveRive=false`
 - `enableRive=true`, `enableLiveRive=true` (stress)
 

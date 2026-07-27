@@ -3,4 +3,8 @@ export { TimeyAvatar } from './TimeyAvatar';
 export { Timey3DAvatar } from './Timey3DAvatar';
 export { TimeyRive } from './TimeyRive';
 export { TimeyGlow } from './TimeyGlow';
+export { TimeyStage } from './TimeyStage';
+export { TIMEY_STAGE_TOKENS, TIMEY_MOTION_PROFILES, getTimeyMotionProfile, resolveTimeyStageMetrics } from './timeyDisplay';
+export type { TimeyStageProps } from './TimeyStage';
+export type { TimeyMotionProfile, TimeyStageVariant, TimeyStageToken, TimeyStageMetrics } from './timeyDisplay';
 export { resolveTimeyState } from './TimeyController';

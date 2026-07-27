@@ -4,7 +4,7 @@ Source SVG:
 - `/Users/kimdoyeon/Dev/TimeFit/design/mascot/rive/source/timey-rive-ready.svg`
 
 Output `.riv`:
-- `/Users/kimdoyeon/Dev/TimeFit/apps/mobile/assets/animations/timey/timey.riv`
+- `/Users/kimdoyeon/Dev/TimeFit/apps/mobile/assets/animations/timey/timey_state_machine.riv`
 
 ---
 
@@ -338,9 +338,8 @@ Loop: OFF (One-shot)
 
 ## 8) Export
 1. Export -> `Rive` 선택
-2. 파일명 `timey.riv`
+2. 파일명 `timey_state_machine.riv`
 3. 저장:
-- `/Users/kimdoyeon/Dev/TimeFit/apps/mobile/assets/animations/timey/timey.riv`
+- `/Users/kimdoyeon/Dev/TimeFit/apps/mobile/assets/animations/timey/timey_state_machine.riv`
 4. 앱 확인:
 - `/dev/timey-preview`에서 `animationMode=rive` + input harness로 검증
-
