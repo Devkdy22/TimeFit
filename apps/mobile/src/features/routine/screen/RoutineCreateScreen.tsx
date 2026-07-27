@@ -3,12 +3,14 @@ import { useMemo, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 import * as Location from 'expo-location';
 import { AppScreen, Header, InfoCard, PrimaryButton } from '../../../components/app';
+import { TimeyStage } from '../../../components/timey';
 import { TimeWheelPicker } from '../../../components/home/TimeWheelPicker';
 import { useAuth } from '../../auth/context';
 import { appColors, appTypography } from '../../../theme/app-tokens';
 import { useNavigationHelper } from '../../../utils/navigation';
 import { useRoutines } from '../context';
 import type { RoutineDay } from '../model/types';
+import { clampRoutineBufferMinutes, parseExcludedDates } from '../model/routineForm';
 import { ApiRequestError } from '../../../services/api/client';
 
 const days: Array<{ key: RoutineDay; label: string }> = [
@@ -20,6 +22,16 @@ const days: Array<{ key: RoutineDay; label: string }> = [
   { key: 'fri', label: '금' },
   { key: 'sat', label: '토' },
 ];
+
+const preferredModes: Array<{ key: 'any' | 'walk' | 'bus' | 'subway' | 'mixed'; label: string }> = [
+  { key: 'any', label: '추천' },
+  { key: 'walk', label: '도보' },
+  { key: 'bus', label: '버스' },
+  { key: 'subway', label: '지하철' },
+  { key: 'mixed', label: '복합' },
+];
+
+const notificationLeadOptions = [5, 10, 15, 30];
 
 export function RoutineCreateScreen() {
   const nav = useNavigationHelper();
@@ -33,10 +45,12 @@ export function RoutineCreateScreen() {
   const [targetTime, setTargetTime] = useState(pendingRoutineSeed?.targetTime ?? '08:50');
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [repeatDays, setRepeatDays] = useState<RoutineDay[]>(['mon', 'tue', 'wed', 'thu', 'fri']);
+  const [bufferMinutes, setBufferMinutes] = useState('10');
+  const [preferredMode, setPreferredMode] = useState<'any' | 'walk' | 'bus' | 'subway' | 'mixed'>('any');
+  const [excludedDatesText, setExcludedDatesText] = useState('');
   const [notificationEnabled, setNotificationEnabled] = useState(true);
-  const [notificationMinutesBefore] = useState(10);
+  const [notificationMinutesBefore, setNotificationMinutesBefore] = useState(10);
   const [favorite, setFavorite] = useState(false);
-  const [memo, setMemo] = useState('');
   const [isSaving, setIsSaving] = useState(false);
 
   const valid = useMemo(
@@ -75,6 +89,10 @@ export function RoutineCreateScreen() {
           destinationLat: destinationCoords.latitude,
           destinationLng: destinationCoords.longitude,
           targetTime,
+          timeMode,
+          bufferMinutes: clampRoutineBufferMinutes(bufferMinutes),
+          preferredMode,
+          excludedDates: parseExcludedDates(excludedDatesText),
           repeatDays,
           notificationEnabled,
           notificationMinutesBefore,
@@ -176,6 +194,8 @@ export function RoutineCreateScreen() {
         }
       />
 
+      <TimeyStage variant="routine" state="waiting" animated glow animationMode="static" />
+
       <InfoCard>
         <Text style={styles.label}>루틴 이름</Text>
         <TextInput value={name} onChangeText={setName} placeholder="예) 출근, 퇴근, 등교" placeholderTextColor={appColors.textMuted} style={styles.input} />
@@ -248,13 +268,63 @@ export function RoutineCreateScreen() {
       </InfoCard>
 
       <InfoCard>
+        <Text style={styles.label}>이동 선호</Text>
+        <Text style={styles.helper}>도착 시간에 맞춰 선택한 교통수단을 우선 고려합니다.</Text>
+        <View style={styles.modeWrap}>
+          {preferredModes.map((mode) => (
+            <Pressable
+              key={mode.key}
+              style={[styles.modeChip, preferredMode === mode.key ? styles.modeChipOn : null]}
+              onPress={() => setPreferredMode(mode.key)}
+            >
+              <Text style={[styles.modeChipText, preferredMode === mode.key ? styles.modeChipTextOn : null]}>{mode.label}</Text>
+            </Pressable>
+          ))}
+        </View>
+        <Text style={[styles.label, styles.secondaryLabel]}>여유 시간(분)</Text>
+        <TextInput
+          value={bufferMinutes}
+          onChangeText={setBufferMinutes}
+          keyboardType="number-pad"
+          placeholder="예) 10"
+          placeholderTextColor={appColors.textMuted}
+          style={styles.input}
+        />
+        <Text style={[styles.label, styles.secondaryLabel]}>예외 날짜(선택)</Text>
+        <TextInput
+          value={excludedDatesText}
+          onChangeText={setExcludedDatesText}
+          placeholder="YYYY-MM-DD, YYYY-MM-DD"
+          placeholderTextColor={appColors.textMuted}
+          style={styles.input}
+        />
+        <Text style={styles.helper}>해당 날짜에는 이 루틴을 실행하지 않습니다.</Text>
+      </InfoCard>
+
+      <InfoCard>
         <View style={styles.rowBetween}>
           <View>
             <Text style={styles.label}>알림 설정</Text>
-            <Text style={styles.helper}>출발 {notificationMinutesBefore}분 전 알림</Text>
+            <Text style={styles.helper}>루틴 실행 시 Push 알림을 보냅니다.</Text>
           </View>
           <Switch value={notificationEnabled} onValueChange={setNotificationEnabled} />
         </View>
+        {notificationEnabled ? (
+          <View style={styles.notificationLeadGroup}>
+            <Text style={styles.helper}>알림 시점</Text>
+            <View style={styles.modeWrap}>
+              {notificationLeadOptions.map((minutes) => (
+                <Pressable
+                  key={minutes}
+                  style={[styles.modeChip, notificationMinutesBefore === minutes ? styles.modeChipOn : null]}
+                  onPress={() => setNotificationMinutesBefore(minutes)}
+                >
+                  <Text style={[styles.modeChipText, notificationMinutesBefore === minutes ? styles.modeChipTextOn : null]}>{minutes}분 전</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
       </InfoCard>
 
       <InfoCard>
@@ -262,18 +332,6 @@ export function RoutineCreateScreen() {
           <Text style={styles.label}>즐겨찾기에 추가</Text>
           <Switch value={favorite} onValueChange={setFavorite} />
         </View>
-      </InfoCard>
-
-      <InfoCard>
-        <Text style={styles.label}>메모 (선택)</Text>
-        <TextInput
-          value={memo}
-          onChangeText={setMemo}
-          placeholder="메모를 입력하세요"
-          placeholderTextColor={appColors.textMuted}
-          style={[styles.input, styles.memo]}
-          multiline
-        />
       </InfoCard>
 
       <PrimaryButton label={isSaving ? '저장 중...' : '저장하기'} onPress={onPressSave} disabled={!valid || isSaving} />
@@ -304,7 +362,6 @@ const styles = StyleSheet.create({
     color: appColors.textPrimary,
     ...appTypography.body,
   },
-  memo: { minHeight: 110, paddingTop: 12, textAlignVertical: 'top' },
   saveText: { color: appColors.primaryDark, ...appTypography.body },
   saveDisabled: { color: appColors.textMuted },
   swapRow: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
@@ -375,7 +432,22 @@ const styles = StyleSheet.create({
   dayChipOn: { backgroundColor: appColors.primary, borderColor: appColors.primary },
   dayText: { color: appColors.textSecondary, ...appTypography.caption },
   dayTextOn: { color: '#FFFFFF', fontWeight: '600' },
+  modeWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  modeChip: {
+    minHeight: 38,
+    paddingHorizontal: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeChipOn: { backgroundColor: appColors.primary, borderColor: appColors.primary },
+  modeChipText: { color: appColors.textSecondary, ...appTypography.caption },
+  modeChipTextOn: { color: '#FFFFFF', fontWeight: '600' },
+  secondaryLabel: { marginTop: 8 },
   rowBetween: { minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  notificationLeadGroup: { marginTop: 12, gap: 8 },
   helper: { color: appColors.textSecondary, ...appTypography.small },
   timeSelectButton: {
     minHeight: 52,

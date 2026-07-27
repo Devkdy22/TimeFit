@@ -38,14 +38,14 @@ export function RoutineCard({ routine, onPress, onPressFavorite, onPressMore }: 
             <Text style={styles.route}>{routine.destinationName}</Text>
           </View>
           <View style={styles.timeWrap}>
-            <Text style={styles.targetTime}>{routine.targetTime}</Text>
+            <Text style={styles.targetTime}>{routine.timeMode === 'departure' ? '출발' : '도착'} {routine.targetTime}</Text>
             <Text style={styles.frequencyText}>주 {weeklyCount}회</Text>
           </View>
         </View>
 
         <View style={styles.rowBottom}>
           <Text style={styles.meta}>
-            {routine.active ? routine.repeatDays.map((d) => dayLabelMap[d]).join('·') : '비활성 · 요일 설정 필요'}
+            {routine.active ? `${routine.repeatDays.map((d) => dayLabelMap[d]).join('·')} · 여유 ${routine.bufferMinutes}분` : '비활성 · 요일 설정 필요'}
           </Text>
           <View style={styles.notifyRow}>
             <Ionicons name={routine.notificationEnabled ? 'notifications' : 'notifications-off'} size={14} color={appColors.textSecondary} />

@@ -1,5 +1,6 @@
 import { StyleSheet, Text, View } from 'react-native';
 import { uiTheme } from '../../constants/theme';
+import { theme } from '../../theme/theme';
 
 export interface TimeDisplayProps {
   label: string;
@@ -37,18 +38,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   label: {
-    ...uiTheme.typography.caption,
+    ...theme.typography.label,
     color: uiTheme.colors.textSecondary,
   },
   time: {
-    ...uiTheme.typography.time,
+    ...theme.typography.cardTitle,
     color: uiTheme.colors.textPrimary,
   },
   timeHero: {
-    fontSize: 44,
-    lineHeight: 50,
+    ...theme.typography.display,
     fontWeight: '700',
-    letterSpacing: 0.2,
   },
   timeEmphasis: {
     color: uiTheme.status.warning,

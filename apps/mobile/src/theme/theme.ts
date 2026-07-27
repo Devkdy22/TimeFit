@@ -22,6 +22,8 @@ export interface SemanticColors {
   text: {
     primary: string;
     secondary: string;
+    tertiary: string;
+    disabled: string;
     inverse: string;
     accent: string;
     critical: string;
@@ -62,6 +64,8 @@ const semanticColorsByMode: Record<ThemeMode, SemanticColors> = {
     text: {
       primary: colorPalette.slate[900],
       secondary: colorPalette.slate[700],
+      tertiary: '#52617A',
+      disabled: colorPalette.slate[300],
       inverse: colorPalette.slate[0],
       accent: colorPalette.sky[500],
       critical: colorPalette.red[600],
@@ -88,6 +92,8 @@ const semanticColorsByMode: Record<ThemeMode, SemanticColors> = {
     text: {
       primary: colorPalette.slate[50],
       secondary: colorPalette.slate[300],
+      tertiary: colorPalette.slate[300],
+      disabled: colorPalette.slate[700],
       inverse: colorPalette.slate[950],
       accent: colorPalette.sky[500],
       critical: colorPalette.red[500],

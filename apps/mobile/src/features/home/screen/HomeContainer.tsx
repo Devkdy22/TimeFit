@@ -17,6 +17,7 @@ import { RoutineSection } from '../components/RoutineSection';
 import { colors, layout, spacing } from '../constants/homeTheme';
 import { selectTimeyContextFromHome } from '../../../domain/timey/timeySelectors';
 import { resolveTimeyStateMachine } from '../../../domain/timey/timeyStateMachine';
+import type { TimeyState } from '../../../domain/timey/timeyTypes';
 import type { Routine as HomeRoutine } from '../types/home.types';
 import type { Routine } from '../../routine/model/types';
 
@@ -30,7 +31,14 @@ function toCoordinateText(latitude: number, longitude: number) {
   return `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`;
 }
 
-export function HomeContainer() {
+type HomeContainerProps = {
+  /** Development-only QA override; production callers leave this unset. */
+  timeyStateOverride?: TimeyState;
+  /** Development-only one-shot greeting replay trigger. */
+  timeyGreetingReplayNonce?: number;
+};
+
+export function HomeContainer({ timeyStateOverride, timeyGreetingReplayNonce = 0 }: HomeContainerProps = {}) {
   const nav = useNavigationHelper();
   const insets = useSafeAreaInsets();
   const { isLoggedIn, profile } = useAuth();
@@ -50,7 +58,7 @@ export function HomeContainer() {
   const hasSavedRoutine = activeRoutines.length > 0;
   const isSearching = !origin || !destination;
   const hasRouteSelected = Boolean(origin && destination && arrivalAt);
-  const homeTimeyState = resolveTimeyStateMachine(
+  const resolvedHomeTimeyState = resolveTimeyStateMachine(
     selectTimeyContextFromHome({
       isGuest,
       hasRouteSelected,
@@ -59,6 +67,7 @@ export function HomeContainer() {
       isFirstVisit: false,
     }),
   );
+  const homeTimeyState = timeyStateOverride ?? resolvedHomeTimeyState;
 
   const openSearchWithOriginChoice = () => {
     if (resolvingCurrentLocation) {
@@ -167,7 +176,11 @@ export function HomeContainer() {
         <LinearGradient colors={[colors.backgroundTop, colors.background]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={StyleSheet.absoluteFillObject} />
 
         <ScrollView contentContainerStyle={[styles.content, { paddingBottom: contentBottom }]} showsVerticalScrollIndicator={false}>
-          <HomeHero userName={isGuest ? undefined : profile?.name ?? undefined} timeyState={homeTimeyState} />
+          <HomeHero
+            userName={isGuest ? undefined : profile?.name ?? undefined}
+            timeyState={homeTimeyState}
+            greetingReplayNonce={timeyGreetingReplayNonce}
+          />
 
           <DepartureCalculatorCard
             arrivalTime={selectedArrivalTime}

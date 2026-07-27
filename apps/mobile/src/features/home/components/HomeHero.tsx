@@ -1,6 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
-import { Dimensions, StyleSheet, Text, View } from 'react-native';
-import { Timey } from '../../../components/timey';
+import { useIsFocused } from '@react-navigation/native';
+import { StyleSheet, Text, useWindowDimensions, View } from 'react-native';
+import { TimeyStage } from '../../../components/timey';
 import type { TimeyState } from '../../../domain/timey/timeyTypes';
 import { getTimeyAccessibilityLabel } from '../../../components/timey/TimeyController';
 import { colors, spacing, typography } from '../constants/homeTheme';
@@ -8,12 +9,15 @@ import { colors, spacing, typography } from '../constants/homeTheme';
 interface HomeHeroProps {
   userName?: string;
   timeyState: TimeyState;
+  greetingReplayNonce?: number;
 }
 
-const { width } = Dimensions.get('window');
-const isSmall = width <= 360;
+export function HomeHero({ userName, timeyState, greetingReplayNonce = 0 }: HomeHeroProps) {
+  const { width } = useWindowDimensions();
+  const isFocused = useIsFocused();
+  const isSmall = width <= 360;
+  const greetingEnabled = isFocused && (timeyState === 'idle' || timeyState === 'confident' || timeyState === 'waiting');
 
-export function HomeHero({ userName, timeyState }: HomeHeroProps) {
   return (
     <LinearGradient colors={[colors.backgroundTop, colors.background]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.wrap}>
       <View style={styles.left}>
@@ -23,13 +27,17 @@ export function HomeHero({ userName, timeyState }: HomeHeroProps) {
         </Text>
         <Text style={styles.subtitle}>원하는 도착 시간을 입력하면 지금 출발해야 할 시간을 알려드릴게요.</Text>
       </View>
-      <View style={styles.mascotWrap}>
-        <Timey
+      <View style={[styles.mascotWrap, isSmall ? styles.mascotSmall : null]}>
+        <TimeyStage
+          variant="home"
           state={timeyState}
+          showOverlay={false}
           animated
           glow
-          size={isSmall ? 'md' : 'lg'}
           animationMode="static"
+          renderStyle="soft3d"
+          greeting={greetingEnabled}
+          greetingReplayNonce={greetingReplayNonce}
           accessibilityLabel={getTimeyAccessibilityLabel(timeyState)}
         />
       </View>
@@ -75,6 +83,8 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'flex-end',
     justifyContent: 'center',
-    opacity: isSmall ? 0.9 : 1,
+  },
+  mascotSmall: {
+    opacity: 0.9,
   },
 });

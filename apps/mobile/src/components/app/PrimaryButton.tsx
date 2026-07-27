@@ -33,6 +33,7 @@ const styles = StyleSheet.create({
   },
   label: {
     color: '#FFFFFF',
-    ...appTypography.cardTitle,
+    ...appTypography.body,
+    fontWeight: '600',
   },
 });

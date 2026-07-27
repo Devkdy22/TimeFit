@@ -1,6 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { homeColors, homeLayout } from '../constants/homeTheme';
+import { typographyPresets } from '../../../theme/typography';
 
 interface EmptyRoutineCardProps {
   onPressCreate: () => void;
@@ -51,14 +52,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   title: {
-    fontFamily: 'Pretendard-Bold',
-    fontSize: 16,
+    ...typographyPresets.cardTitle,
     color: homeColors.textPrimary,
   },
   description: {
-    fontFamily: 'Pretendard-Medium',
-    fontSize: 13,
-    lineHeight: 19,
+    ...typographyPresets.body.md,
     color: homeColors.textSecondary,
   },
   benefits: {
@@ -66,7 +64,8 @@ const styles = StyleSheet.create({
   },
   benefit: {
     fontFamily: 'Pretendard-Medium',
-    fontSize: 12,
+    fontSize: 13,
+    lineHeight: 20,
     color: homeColors.textTertiary,
   },
   primaryCta: {
@@ -79,8 +78,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   primaryCtaText: {
-    fontFamily: 'Pretendard-ExtraBold',
-    fontSize: 15,
+    ...typographyPresets.bodyEmphasis,
     color: '#FFFFFF',
   },
   secondaryTextBtn: {
@@ -88,8 +86,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   secondaryText: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 13,
+    ...typographyPresets.label,
     color: homeColors.primaryDark,
   },
 });

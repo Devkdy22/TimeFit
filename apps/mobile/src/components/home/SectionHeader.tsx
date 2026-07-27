@@ -1,5 +1,6 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { colors } from '../../theme/colors';
+import { typographyPresets } from '../../theme/typography';
 
 interface SectionHeaderProps {
   title: string;
@@ -27,13 +28,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 24,
+    ...typographyPresets.sectionTitle,
     color: colors.textPrimary,
   },
   action: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 17,
+    ...typographyPresets.label,
     color: colors.primary,
   },
 });

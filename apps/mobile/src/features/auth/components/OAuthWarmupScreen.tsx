@@ -1,7 +1,7 @@
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useRef, useState } from 'react';
 import { AccessibilityInfo, Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
-import { TimeyMascot } from '../../../components/app';
+import { TimeyStage } from '../../../components/timey';
 import { appColors, appTypography } from '../../../theme/app-tokens';
 import type { OAuthWarmupState, SocialProvider } from '../context';
 
@@ -65,7 +65,7 @@ export function OAuthWarmupScreen({ state, onRetry, onCancel }: OAuthWarmupScree
   }
 
   const providerMessage = state.provider ? providerCopy[state.provider] : '로그인 화면을 준비하고 있어요';
-  const mascotExpression = state.status === 'error' ? 'concerned' : state.status === 'ready' ? 'smile' : 'neutral';
+  const mascotState = state.status === 'error' ? 'warning' : state.status === 'ready' ? 'success' : 'searching';
   const translateY = bob.interpolate({
     inputRange: [0, 1],
     outputRange: [0, -8],
@@ -83,7 +83,7 @@ export function OAuthWarmupScreen({ state, onRetry, onCancel }: OAuthWarmupScree
 
         <View style={styles.content}>
           <Animated.View style={[styles.mascotWrap, reduceMotion ? null : { transform: [{ translateY }] }]}>
-            <TimeyMascot size={132} expression={mascotExpression} />
+            <TimeyStage variant="route" state={mascotState} animated={!reduceMotion} glow animationMode="static" />
             <View style={styles.keyBubble}>
               <Text style={styles.keyText}>{state.status === 'ready' ? '✓' : '🔑'}</Text>
             </View>

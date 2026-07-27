@@ -63,7 +63,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.md,
   },
   label: {
-    ...theme.typography.caption.md,
+    ...theme.typography.label,
   },
   dot: {
     width: 8,

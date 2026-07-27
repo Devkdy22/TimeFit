@@ -47,12 +47,12 @@ const styles = StyleSheet.create({
     gap: theme.spacing.xs,
   },
   title: {
-    ...theme.typography.title.lg,
+    ...theme.typography.sectionTitle,
     color: theme.colors.text.primary,
   },
   subtitle: {
-    ...theme.typography.body.md,
-    color: theme.colors.text.secondary,
+    ...theme.typography.helper,
+    color: theme.colors.text.tertiary,
   },
   action: {
     minHeight: 44,
@@ -60,6 +60,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: theme.spacing.sm,
   },
   actionText: {
-    ...theme.typography.body.strong,
+    ...theme.typography.label,
+    color: theme.colors.text.accent,
   },
 });

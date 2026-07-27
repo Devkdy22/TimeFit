@@ -2,6 +2,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { homeColors } from '../constants/homeTheme';
 import type { Routine } from '../types/home.types';
+import { typographyPresets } from '../../../theme/typography';
 
 interface RoutineItemCardProps {
   routine?: Routine;
@@ -30,8 +31,8 @@ export function RoutineItemCard({ routine, isAdd = false, onPress }: RoutineItem
       <View style={styles.iconCircle}>
         <Ionicons name="repeat" size={16} color={homeColors.primaryDark} />
       </View>
-      <Text style={styles.title} numberOfLines={1}>{routine.name}</Text>
-      <Text style={styles.subtitle} numberOfLines={1}>{routine.daysLabel}</Text>
+      <Text style={styles.title} numberOfLines={2}>{routine.name}</Text>
+      <Text style={styles.subtitle} numberOfLines={2}>{routine.daysLabel}</Text>
       <Text style={styles.time}>{routine.departureTime} 출발</Text>
     </Pressable>
   );
@@ -40,7 +41,7 @@ export function RoutineItemCard({ routine, isAdd = false, onPress }: RoutineItem
 const styles = StyleSheet.create({
   card: {
     width: 124,
-    height: 136,
+    minHeight: 148,
     borderRadius: 18,
     borderWidth: 1,
     borderColor: homeColors.border,
@@ -63,8 +64,7 @@ const styles = StyleSheet.create({
   },
   addTitle: {
     marginTop: 8,
-    fontFamily: 'Pretendard-Bold',
-    fontSize: 14,
+    ...typographyPresets.label,
     color: homeColors.primaryDark,
   },
   iconCircle: {
@@ -77,20 +77,17 @@ const styles = StyleSheet.create({
   },
   title: {
     marginTop: 10,
-    fontFamily: 'Pretendard-Bold',
-    fontSize: 14,
+    ...typographyPresets.cardTitle,
     color: homeColors.textPrimary,
   },
   subtitle: {
     marginTop: 4,
-    fontFamily: 'Pretendard-Medium',
-    fontSize: 12,
+    ...typographyPresets.caption.md,
     color: homeColors.textSecondary,
   },
   time: {
     marginTop: 6,
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 12,
+    ...typographyPresets.label,
     color: homeColors.textTertiary,
   },
 });

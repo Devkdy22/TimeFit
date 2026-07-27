@@ -13,13 +13,17 @@ export const appColors = {
   success: '#4CC7C1',
 } as const;
 
+import { typographyPresets } from './typography';
+
+// Backward-compatible aliases for older app components. New screens should use
+// the semantic roles in theme.typography directly.
 export const appTypography = {
-  screenTitle: { fontSize: 24, fontWeight: '700' as const },
-  sectionTitle: { fontSize: 18, fontWeight: '700' as const },
-  cardTitle: { fontSize: 17, fontWeight: '700' as const },
-  body: { fontSize: 15, fontWeight: '500' as const },
-  caption: { fontSize: 13, fontWeight: '400' as const },
-  small: { fontSize: 12, fontWeight: '400' as const },
+  screenTitle: typographyPresets.screenTitle,
+  sectionTitle: typographyPresets.sectionTitle,
+  cardTitle: typographyPresets.cardTitle,
+  body: typographyPresets.body.md,
+  caption: typographyPresets.caption.md,
+  small: typographyPresets.helper,
 } as const;
 
 export const appSpacing = {

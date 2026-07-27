@@ -13,11 +13,13 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { AppScreen, PrimaryButton, RoutineCard, TimeyMascot } from '../../../components/app';
+import { AppScreen, PrimaryButton, RoutineCard } from '../../../components/app';
+import { TimeyStage } from '../../../components/timey';
 import { TimeWheelPicker } from '../../../components/home/TimeWheelPicker';
 import { appColors, appTypography } from '../../../theme/app-tokens';
 import { useRoutines } from '../context';
 import type { Routine, RoutineDay } from '../model/types';
+import { clampRoutineBufferMinutes, parseExcludedDates } from '../model/routineForm';
 import { useNavigationHelper } from '../../../utils/navigation';
 import { useAuth } from '../../auth/context';
 import { useCommutePlan } from '../../commute-state/context';
@@ -25,6 +27,15 @@ import Svg, { Defs, LinearGradient, Rect, Stop } from 'react-native-svg';
 import { ApiRequestError } from '../../../services/api/client';
 
 type RoutineTab = 'all' | 'favorite' | 'recent';
+const notificationLeadOptions = [5, 10, 15, 30];
+const preferredModes: Array<{ key: 'any' | 'walk' | 'bus' | 'subway' | 'mixed'; label: string }> = [
+  { key: 'any', label: '추천' },
+  { key: 'walk', label: '도보' },
+  { key: 'bus', label: '버스' },
+  { key: 'subway', label: '지하철' },
+  { key: 'mixed', label: '복합' },
+];
+
 const days: Array<{ key: RoutineDay; label: string }> = [
   { key: 'sun', label: '일' },
   { key: 'mon', label: '월' },
@@ -46,10 +57,15 @@ export function RoutineScreen() {
   const [originName, setOriginName] = useState('');
   const [destinationName, setDestinationName] = useState('');
   const [targetTime, setTargetTime] = useState('08:50');
+  const [timeMode, setTimeMode] = useState<'arrival' | 'departure'>('arrival');
   const [timePickerVisible, setTimePickerVisible] = useState(false);
   const [repeatDays, setRepeatDays] = useState<RoutineDay[]>(['mon', 'tue', 'wed', 'thu', 'fri']);
+  const [bufferMinutes, setBufferMinutes] = useState('10');
+  const [preferredMode, setPreferredMode] = useState<'any' | 'walk' | 'bus' | 'subway' | 'mixed'>('any');
+  const [excludedDatesText, setExcludedDatesText] = useState('');
   const [favorite, setFavorite] = useState(false);
   const [notificationEnabled, setNotificationEnabled] = useState(true);
+  const [notificationMinutesBefore, setNotificationMinutesBefore] = useState(10);
   const [isCreating, setIsCreating] = useState(false);
   const [editVisible, setEditVisible] = useState(false);
   const [selectedRoutine, setSelectedRoutine] = useState<Routine | null>(null);
@@ -57,9 +73,14 @@ export function RoutineScreen() {
   const [editOrigin, setEditOrigin] = useState('');
   const [editDestination, setEditDestination] = useState('');
   const [editTargetTime, setEditTargetTime] = useState('');
+  const [editTimeMode, setEditTimeMode] = useState<'arrival' | 'departure'>('arrival');
   const [editTimePickerVisible, setEditTimePickerVisible] = useState(false);
   const [editRepeatDays, setEditRepeatDays] = useState<RoutineDay[]>([]);
+  const [editBufferMinutes, setEditBufferMinutes] = useState('10');
+  const [editPreferredMode, setEditPreferredMode] = useState<'any' | 'walk' | 'bus' | 'subway' | 'mixed'>('any');
+  const [editExcludedDatesText, setEditExcludedDatesText] = useState('');
   const [editNotificationEnabled, setEditNotificationEnabled] = useState(true);
+  const [editNotificationMinutesBefore, setEditNotificationMinutesBefore] = useState(10);
   const [editFavorite, setEditFavorite] = useState(false);
   const [editActive, setEditActive] = useState(true);
   const heartPop = useRef(new Animated.Value(0)).current;
@@ -135,8 +156,13 @@ export function RoutineScreen() {
         setEditOrigin(item.originName);
         setEditDestination(item.destinationName);
         setEditTargetTime(item.targetTime);
+        setEditTimeMode(item.timeMode);
         setEditRepeatDays(item.repeatDays);
+        setEditBufferMinutes(String(item.bufferMinutes));
+        setEditPreferredMode(item.preferredMode);
+        setEditExcludedDatesText(item.excludedDates.join(', '));
         setEditNotificationEnabled(item.notificationEnabled);
+        setEditNotificationMinutesBefore(item.notificationMinutesBefore);
         setEditFavorite(item.favorite);
         setEditActive(item.active);
         setEditVisible(true);
@@ -149,9 +175,14 @@ export function RoutineScreen() {
     setOriginName('');
     setDestinationName('');
     setTargetTime('08:50');
+    setTimeMode('arrival');
     setRepeatDays(['mon', 'tue', 'wed', 'thu', 'fri']);
+    setBufferMinutes('10');
+    setPreferredMode('any');
+    setExcludedDatesText('');
     setFavorite(false);
     setNotificationEnabled(true);
+    setNotificationMinutesBefore(10);
   };
 
   const openCreatePopup = () => setCreateVisible(true);
@@ -195,9 +226,13 @@ export function RoutineScreen() {
           destinationLat: destinationCoords.latitude,
           destinationLng: destinationCoords.longitude,
           targetTime,
+          timeMode,
+          bufferMinutes: clampRoutineBufferMinutes(bufferMinutes),
+          preferredMode,
+          excludedDates: parseExcludedDates(excludedDatesText),
           repeatDays,
           notificationEnabled,
-          notificationMinutesBefore: 10,
+          notificationMinutesBefore,
           favorite,
           signal: controller.signal,
         });
@@ -251,8 +286,13 @@ export function RoutineScreen() {
           destinationLat: destinationCoords.latitude,
           destinationLng: destinationCoords.longitude,
           targetTime: editTargetTime.trim(),
+          timeMode: editTimeMode,
+          bufferMinutes: clampRoutineBufferMinutes(editBufferMinutes),
+          preferredMode: editPreferredMode,
+          excludedDates: parseExcludedDates(editExcludedDatesText),
           repeatDays: nextRepeatDays,
           notificationEnabled: editNotificationEnabled,
+          notificationMinutesBefore: editNotificationMinutesBefore,
           favorite: editFavorite,
           active: editActive,
         });
@@ -420,7 +460,7 @@ export function RoutineScreen() {
             <Ionicons name="heart" size={13} color="#F09AA0" />
           </Animated.View>
           <View>
-            <TimeyMascot size={94} expression="neutral" />
+            <TimeyStage variant="routine" state="idle" animated glow animationMode="static" />
           </View>
         </View>
       </View>
@@ -455,7 +495,7 @@ export function RoutineScreen() {
         <View style={styles.listBox}>
           {filteredRoutines.length === 0 ? (
             <View style={styles.emptyWrap}>
-              <TimeyMascot size={80} expression="neutral" />
+              <TimeyStage variant="routine" state="waiting" animated glow animationMode="static" />
               <Text style={styles.emptyTitle}>아직 저장된 루틴이 없어요</Text>
               <Text style={styles.emptyBody}>
                 자주 가는 경로를 저장하면 더 빠르게 이동할 수 있어요.
@@ -518,6 +558,22 @@ export function RoutineScreen() {
               <Text style={styles.timeSelectLabel}>시간 선택</Text>
               <Text style={styles.timeSelectValue}>{editTargetTime}</Text>
             </Pressable>
+            <View style={styles.leadOptionWrap}>
+              {(['arrival', 'departure'] as const).map((mode) => (
+                <Pressable key={mode} onPress={() => setEditTimeMode(mode)} style={[styles.leadOption, editTimeMode === mode ? styles.leadOptionOn : null]}>
+                  <Text style={[styles.leadOptionText, editTimeMode === mode ? styles.leadOptionTextOn : null]}>{mode === 'arrival' ? '도착 시간 기준' : '출발 시간 기준'}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <TextInput value={editBufferMinutes} onChangeText={setEditBufferMinutes} keyboardType="number-pad" placeholder="여유 시간(분)" placeholderTextColor={appColors.textMuted} style={styles.input} />
+            <View style={styles.leadOptionWrap}>
+              {preferredModes.map((mode) => (
+                <Pressable key={mode.key} onPress={() => setEditPreferredMode(mode.key)} style={[styles.leadOption, editPreferredMode === mode.key ? styles.leadOptionOn : null]}>
+                  <Text style={[styles.leadOptionText, editPreferredMode === mode.key ? styles.leadOptionTextOn : null]}>{mode.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <TextInput value={editExcludedDatesText} onChangeText={setEditExcludedDatesText} placeholder="예외 날짜: YYYY-MM-DD, YYYY-MM-DD" placeholderTextColor={appColors.textMuted} style={styles.input} />
 
             <View style={styles.dayWrap}>
               {days.map((day) => {
@@ -546,6 +602,18 @@ export function RoutineScreen() {
               <Text style={styles.toggleLabel}>알림 사용</Text>
               <Switch value={editNotificationEnabled} onValueChange={setEditNotificationEnabled} />
             </View>
+            {editNotificationEnabled ? (
+              <View style={styles.notificationLeadOptions}>
+                <Text style={styles.toggleLabel}>알림 시점</Text>
+                <View style={styles.leadOptionWrap}>
+                  {notificationLeadOptions.map((minutes) => (
+                    <Pressable key={minutes} onPress={() => setEditNotificationMinutesBefore(minutes)} style={[styles.leadOption, editNotificationMinutesBefore === minutes ? styles.leadOptionOn : null]}>
+                      <Text style={[styles.leadOptionText, editNotificationMinutesBefore === minutes ? styles.leadOptionTextOn : null]}>{minutes}분 전</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ) : null}
             <View style={styles.toggleRow}>
               <Text style={styles.toggleLabel}>활성화</Text>
               <Switch value={editActive} onValueChange={setEditActive} />
@@ -624,6 +692,22 @@ export function RoutineScreen() {
               <Text style={styles.timeSelectLabel}>시간 선택</Text>
               <Text style={styles.timeSelectValue}>{targetTime}</Text>
             </Pressable>
+            <View style={styles.leadOptionWrap}>
+              {(['arrival', 'departure'] as const).map((mode) => (
+                <Pressable key={mode} onPress={() => setTimeMode(mode)} style={[styles.leadOption, timeMode === mode ? styles.leadOptionOn : null]}>
+                  <Text style={[styles.leadOptionText, timeMode === mode ? styles.leadOptionTextOn : null]}>{mode === 'arrival' ? '도착 시간 기준' : '출발 시간 기준'}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <TextInput value={bufferMinutes} onChangeText={setBufferMinutes} keyboardType="number-pad" placeholder="여유 시간(분)" placeholderTextColor={appColors.textMuted} style={styles.input} />
+            <View style={styles.leadOptionWrap}>
+              {preferredModes.map((mode) => (
+                <Pressable key={mode.key} onPress={() => setPreferredMode(mode.key)} style={[styles.leadOption, preferredMode === mode.key ? styles.leadOptionOn : null]}>
+                  <Text style={[styles.leadOptionText, preferredMode === mode.key ? styles.leadOptionTextOn : null]}>{mode.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <TextInput value={excludedDatesText} onChangeText={setExcludedDatesText} placeholder="예외 날짜: YYYY-MM-DD, YYYY-MM-DD" placeholderTextColor={appColors.textMuted} style={styles.input} />
 
             <View style={styles.dayWrap}>
               {days.map((day) => {
@@ -654,6 +738,18 @@ export function RoutineScreen() {
               <Text style={styles.toggleLabel}>알림 사용</Text>
               <Switch value={notificationEnabled} onValueChange={setNotificationEnabled} />
             </View>
+            {notificationEnabled ? (
+              <View style={styles.notificationLeadOptions}>
+                <Text style={styles.toggleLabel}>알림 시점</Text>
+                <View style={styles.leadOptionWrap}>
+                  {notificationLeadOptions.map((minutes) => (
+                    <Pressable key={minutes} onPress={() => setNotificationMinutesBefore(minutes)} style={[styles.leadOption, notificationMinutesBefore === minutes ? styles.leadOptionOn : null]}>
+                      <Text style={[styles.leadOptionText, notificationMinutesBefore === minutes ? styles.leadOptionTextOn : null]}>{minutes}분 전</Text>
+                    </Pressable>
+                  ))}
+                </View>
+              </View>
+            ) : null}
 
             <PrimaryButton label="저장하기" onPress={saveRoutine} disabled={!valid} />
           </View>
@@ -944,5 +1040,19 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  notificationLeadOptions: { gap: 6 },
+  leadOptionWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  leadOption: {
+    minHeight: 34,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: appColors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  leadOptionOn: { backgroundColor: appColors.primary, borderColor: appColors.primary },
+  leadOptionText: { color: appColors.textSecondary, ...appTypography.small },
+  leadOptionTextOn: { color: '#FFFFFF', fontWeight: '600' },
   toggleLabel: { color: appColors.textPrimary, ...appTypography.caption },
 });

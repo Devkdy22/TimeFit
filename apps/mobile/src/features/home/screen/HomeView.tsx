@@ -12,6 +12,7 @@ import {
   type RecentDestination,
 } from '../../../components/home';
 import { colors } from '../../../theme/colors';
+import { typographyPresets } from '../../../theme/typography';
 
 export interface HomeViewProps {
   userName: string;
@@ -159,7 +160,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 132,
-    gap: 16,
+    gap: 24,
   },
   topSection: {
     alignItems: 'center',
@@ -169,15 +170,12 @@ const styles = StyleSheet.create({
   },
   greeting: {
     marginTop: 8,
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 15,
+    ...typographyPresets.body.md,
     color: colors.textSecondary,
   },
   title: {
     marginTop: 4,
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 34,
-    lineHeight: 40,
+    ...typographyPresets.screenTitle,
     color: colors.textPrimary,
   },
   recentSection: {
@@ -201,14 +199,12 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   emptyRecentTitle: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 16,
+    ...typographyPresets.cardTitle,
     color: colors.textPrimary,
   },
   emptyRecentBody: {
     marginTop: 6,
-    fontFamily: 'Pretendard-Medium',
-    fontSize: 14,
+    ...typographyPresets.helper,
     color: colors.textSecondary,
   },
   recentToggleBtn: {
@@ -222,8 +218,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(88, 199, 194, 0.22)',
   },
   recentToggleText: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 13,
+    ...typographyPresets.label,
     color: '#2C8F8B',
   },
 });

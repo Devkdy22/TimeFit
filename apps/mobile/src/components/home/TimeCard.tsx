@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../../theme/colors';
 import type { CommuteStatus } from './types';
 import { TimeWheelPicker } from './TimeWheelPicker';
+import { typographyPresets } from '../../theme/typography';
 
 interface TimeCardProps {
   arrivalTime: string;
@@ -130,7 +131,7 @@ export function TimeCard({
         >
           <View style={styles.destinationLeft}>
             <Ionicons name="location-outline" size={18} color={appearance.iconTint} />
-            <Text style={styles.destination} numberOfLines={1}>
+            <Text style={styles.destination} numberOfLines={2}>
               {destination}
             </Text>
           </View>
@@ -216,8 +217,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   label: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 16,
+    ...typographyPresets.label,
     color: colors.textSecondary,
   },
   badge: {
@@ -226,8 +226,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   badgeText: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 15,
+    ...typographyPresets.label,
   },
   timePressable: {
     marginTop: 14,
@@ -256,13 +255,11 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   timeActionChipText: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 11,
+    ...typographyPresets.caption.md,
     color: '#426464',
   },
   arrivalTime: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 38,
+    ...typographyPresets.display,
     color: colors.textPrimary,
     letterSpacing: 0.3,
     flexShrink: 1,
@@ -282,8 +279,7 @@ const styles = StyleSheet.create({
   },
   timeHintText: {
     flex: 1,
-    fontFamily: 'Pretendard-Medium',
-    fontSize: 12,
+    ...typographyPresets.helper,
     color: '#2C6E6B',
   },
   destinationRow: {
@@ -306,8 +302,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   destination: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 20,
+    ...typographyPresets.cardTitle,
     color: colors.textSecondary,
     flexShrink: 1,
   },
@@ -318,8 +313,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   destinationActionChipText: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 12,
+    ...typographyPresets.caption.md,
     color: '#426464',
   },
   divider: {
@@ -328,13 +322,11 @@ const styles = StyleSheet.create({
     backgroundColor: colors.border,
   },
   headline: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 22,
+    ...typographyPresets.sectionTitle,
     color: colors.textPrimary,
   },
   eta: {
-    fontFamily: 'Pretendard-Medium',
-    fontSize: 16,
+    ...typographyPresets.body.md,
     color: colors.textSecondary,
   },
   cta: {
@@ -356,8 +348,7 @@ const styles = StyleSheet.create({
     transform: [{ scale: 0.985 }],
   },
   ctaText: {
-    fontFamily: 'Pretendard-SemiBold',
-    fontSize: 20,
+    ...typographyPresets.bodyEmphasis,
     color: colors.white,
   },
   ctaSubtle: {

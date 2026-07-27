@@ -11,12 +11,30 @@ export interface TypographyPreset {
 }
 
 export const typographyPresets = {
+  display: {
+    ...fontStyle('display', font.family.bold, font.weight.bold, 0.2),
+  },
+  screenTitle: {
+    ...fontStyle('screenTitle', font.family.bold, font.weight.bold, 0.1),
+  },
+  sectionTitle: {
+    ...fontStyle('sectionTitle', font.family.bold, font.weight.bold, 0),
+  },
+  cardTitle: {
+    ...fontStyle('cardTitle', font.family.semibold, font.weight.semibold, 0),
+  },
+  label: {
+    ...fontStyle('label', font.family.semibold, font.weight.semibold, 0.1),
+  },
+  helper: {
+    ...fontStyle('caption', font.family.regular, font.weight.regular, 0),
+  },
   title: {
     lg: {
       fontFamily: font.family.bold,
       fontWeight: font.weight.bold,
-      fontSize: font.size.title,
-      lineHeight: font.lineHeight.title,
+      fontSize: font.size.screenTitle,
+      lineHeight: font.lineHeight.screenTitle,
       letterSpacing: 0.2,
       includeFontPadding: false,
     } satisfies TypographyPreset,
@@ -52,6 +70,13 @@ export const typographyPresets = {
       includeFontPadding: false,
     } satisfies TypographyPreset,
   },
+  bodyEmphasis: {
+    fontFamily: font.family.semibold,
+    fontWeight: font.weight.semibold,
+    fontSize: font.size.body,
+    lineHeight: font.lineHeight.body,
+    includeFontPadding: false,
+  } satisfies TypographyPreset,
   caption: {
     md: {
       fontFamily: font.family.medium,
@@ -63,3 +88,19 @@ export const typographyPresets = {
     } satisfies TypographyPreset,
   },
 } as const;
+
+function fontStyle(
+  role: keyof typeof font.size,
+  fontFamily: string,
+  fontWeight: TypographyPreset['fontWeight'],
+  letterSpacing: number,
+): TypographyPreset {
+  return {
+    fontFamily,
+    fontWeight,
+    fontSize: font.size[role],
+    lineHeight: font.lineHeight[role],
+    letterSpacing,
+    includeFontPadding: false,
+  };
+}

@@ -96,6 +96,6 @@ const styles = StyleSheet.create({
     shadowRadius: 13,
   },
   label: {
-    ...theme.typography.body.strong,
+    ...theme.typography.bodyEmphasis,
   },
 });

@@ -35,6 +35,10 @@ interface RoutineContextValue {
     destinationLat: number;
     destinationLng: number;
     targetTime: string;
+    timeMode?: 'arrival' | 'departure';
+    bufferMinutes?: number;
+    preferredMode?: 'any' | 'walk' | 'bus' | 'subway' | 'mixed';
+    excludedDates?: string[];
     repeatDays: RoutineDay[];
     notificationEnabled: boolean;
     notificationMinutesBefore: number;
@@ -196,6 +200,10 @@ export function RoutineProvider({ children }: { children: ReactNode }) {
           },
           weekdays: input.repeatDays.map((day) => dayToWeekdayIndex(day)),
           arrivalTime: input.targetTime.trim(),
+          timeMode: input.timeMode ?? 'arrival',
+          bufferMinutes: input.bufferMinutes ?? 0,
+          preferredMode: input.preferredMode ?? 'any',
+          excludedDates: input.excludedDates ?? [],
         });
 
         const existing = createInFlightRef.current.get(payloadFingerprint);
@@ -221,6 +229,10 @@ export function RoutineProvider({ children }: { children: ReactNode }) {
               },
               weekdays: input.repeatDays.map((day) => dayToWeekdayIndex(day)),
               arrivalTime: input.targetTime.trim(),
+              timeMode: input.timeMode ?? 'arrival',
+              bufferMinutes: input.bufferMinutes ?? 0,
+              preferredMode: input.preferredMode ?? 'any',
+              excludedDates: input.excludedDates ?? [],
               notificationEnabled: input.notificationEnabled,
               notificationMinutesBefore: input.notificationMinutesBefore,
               favorite: input.favorite,
@@ -244,7 +256,10 @@ export function RoutineProvider({ children }: { children: ReactNode }) {
             destinationLat: created.destination.lat,
             destinationLng: created.destination.lng,
             targetTime: created.arrivalTime,
-            timeMode: 'arrival',
+            timeMode: created.timeMode,
+            bufferMinutes: created.bufferMinutes,
+            preferredMode: created.preferredMode,
+            excludedDates: created.excludedDates,
             repeatDays: created.weekdays
               .map((weekday) => weekdayIndexToDay(weekday))
               .filter((day): day is RoutineDay => day !== null),
@@ -426,7 +441,10 @@ function routineFromRemote(item: RoutineListItem): Routine {
     destinationLat: item.destination.lat,
     destinationLng: item.destination.lng,
     targetTime: item.arrivalTime,
-    timeMode: 'arrival',
+    timeMode: item.timeMode,
+    bufferMinutes: item.bufferMinutes,
+    preferredMode: item.preferredMode,
+    excludedDates: item.excludedDates,
     repeatDays: item.weekdays
       .map((weekday) => weekdayIndexToDay(weekday))
       .filter((day): day is RoutineDay => day !== null),
@@ -445,6 +463,10 @@ function routinePatchToRequest(routine: Routine, patch: Partial<Routine>) {
     destination?: { name: string; lat: number; lng: number };
     weekdays?: number[];
     arrivalTime?: string;
+    timeMode?: 'arrival' | 'departure';
+    bufferMinutes?: number;
+    preferredMode?: 'any' | 'walk' | 'bus' | 'subway' | 'mixed';
+    excludedDates?: string[];
     notificationEnabled?: boolean;
     notificationMinutesBefore?: number;
     favorite?: boolean;
@@ -481,6 +503,18 @@ function routinePatchToRequest(routine: Routine, patch: Partial<Routine>) {
   }
   if (patch.targetTime !== undefined) {
     request.arrivalTime = routine.targetTime.trim();
+  }
+  if (patch.timeMode !== undefined) {
+    request.timeMode = routine.timeMode;
+  }
+  if (patch.bufferMinutes !== undefined) {
+    request.bufferMinutes = routine.bufferMinutes;
+  }
+  if (patch.preferredMode !== undefined) {
+    request.preferredMode = routine.preferredMode;
+  }
+  if (patch.excludedDates !== undefined) {
+    request.excludedDates = routine.excludedDates;
   }
   if (patch.notificationEnabled !== undefined) {
     request.notificationEnabled = routine.notificationEnabled;

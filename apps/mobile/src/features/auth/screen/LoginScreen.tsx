@@ -1,5 +1,6 @@
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
-import { AppScreen, SocialLoginButton, TimeyMascot } from '../../../components/app';
+import { AppScreen, SocialLoginButton } from '../../../components/app';
+import { TimeyStage } from '../../../components/timey';
 import { appColors, appTypography } from '../../../theme/app-tokens';
 import { useNavigationHelper } from '../../../utils/navigation';
 import { OAuthWarmupScreen } from '../components/OAuthWarmupScreen';
@@ -33,7 +34,7 @@ export function LoginScreen() {
         <View style={styles.topSpacer} />
 
         <View style={styles.centerArea}>
-          <TimeyMascot size={110} expression="smile" />
+          <TimeyStage variant="routine" state="confident" animated glow animationMode="static" />
           <Text style={styles.title}>루틴 저장은 로그인이 필요해요</Text>
           <Text style={styles.subtitle}>타임이와 함께 자주 가는 경로, 알림, 장소를 안전하게 저장할 수 있어요.</Text>
         </View>

@@ -11,6 +11,9 @@ export type Routine = {
   destinationLng: number;
   targetTime: string;
   timeMode: 'arrival' | 'departure';
+  bufferMinutes: number;
+  preferredMode: 'any' | 'walk' | 'bus' | 'subway' | 'mixed';
+  excludedDates: string[];
   repeatDays: RoutineDay[];
   notificationEnabled: boolean;
   notificationMinutesBefore: number;
