@@ -86,7 +86,13 @@ export class BusRealtimeProvider {
               : resolved.provider === 'INCHEON'
                 ? 'INCHEON_API'
                 : 'CACHE',
-        updatedAt: resolved.updatedAt,
+        // An unavailable/checking response is an attempt timestamp, not a
+        // successful provider update. Keep the UI from presenting it as
+        // fresh data; stale responses still preserve their cache timestamp.
+        updatedAt:
+          resolved.status === 'UNAVAILABLE' || resolved.status === 'CHECKING'
+            ? undefined
+            : resolved.updatedAt,
         debug: resolved.debug ?? undefined,
       },
       candidates,

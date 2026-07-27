@@ -62,6 +62,59 @@ describe('OdsayTransitClient', () => {
     expect(result.status).toBe('PROVIDER_DOWN');
   });
 
+  it('returns PROVIDER_UNAVAILABLE when the provider key is missing', async () => {
+    const fetchMock = jest.fn();
+    (global as unknown as { fetch: typeof fetch }).fetch = fetchMock as never;
+
+    const client = new OdsayTransitClient(
+      { ...appConfigService, odsayApiKey: '' } as never,
+      new SafeLogger(),
+      usageRepo as never,
+    );
+    const result = await client.fetchTransitRoutes(origin, destination);
+
+    expect(result.status).toBe('PROVIDER_UNAVAILABLE');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('returns APPLICATION_ERROR on provider 4xx response', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({ ok: false, status: 400 });
+    (global as unknown as { fetch: typeof fetch }).fetch = fetchMock as never;
+
+    const client = new OdsayTransitClient(appConfigService as never, new SafeLogger(), usageRepo as never);
+    const result = await client.fetchTransitRoutes(origin, destination);
+
+    expect(result.status).toBe('APPLICATION_ERROR');
+  });
+
+  it('returns APPLICATION_ERROR on malformed provider JSON', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => {
+        throw new SyntaxError('Unexpected token');
+      },
+    });
+    (global as unknown as { fetch: typeof fetch }).fetch = fetchMock as never;
+
+    const client = new OdsayTransitClient(appConfigService as never, new SafeLogger(), usageRepo as never);
+    const result = await client.fetchTransitRoutes(origin, destination);
+
+    expect(result.status).toBe('APPLICATION_ERROR');
+  });
+
+  it('returns APPLICATION_ERROR on malformed provider schema', async () => {
+    const fetchMock = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ result: { path: 'not-an-array' } }),
+    });
+    (global as unknown as { fetch: typeof fetch }).fetch = fetchMock as never;
+
+    const client = new OdsayTransitClient(appConfigService as never, new SafeLogger(), usageRepo as never);
+    const result = await client.fetchTransitRoutes(origin, destination);
+
+    expect(result.status).toBe('APPLICATION_ERROR');
+  });
+
   it('warns when coordinate order looks suspicious', async () => {
     const fetchMock = jest.fn().mockResolvedValue({
       ok: true,
@@ -141,7 +194,7 @@ describe('OdsayTransitClient', () => {
 
     nowSpy.mockReturnValue(50_000); // fresh cache expired, stale window alive
     const second = await client.fetchTransitRoutes(origin, destination);
-    expect(second.status).toBe('OK');
+    expect(second.status).toBe('PROVIDER_DOWN');
     expect(second.meta?.staleFallback).toBe(true);
   });
 

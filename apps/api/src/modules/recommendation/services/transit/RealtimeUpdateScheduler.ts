@@ -23,6 +23,8 @@ export interface RouteTrackingEvent {
 interface TrackingState {
   route: MobilityRoute;
   timer: NodeJS.Timeout | null;
+  refreshing: boolean;
+  routeInvalidated: boolean;
   targetArrivalAt?: string;
   appState: 'foreground' | 'background';
   pollIntervalMs: number;
@@ -56,6 +58,7 @@ export class RealtimeUpdateScheduler implements OnModuleDestroy {
     const previous = this.trackingByRouteId.get(route.id);
     if (previous) {
       previous.route = route;
+      previous.routeInvalidated = (route.mobilitySegments ?? []).length === 0;
       previous.targetArrivalAt = targetArrivalAt ?? previous.targetArrivalAt;
       return;
     }
@@ -63,6 +66,8 @@ export class RealtimeUpdateScheduler implements OnModuleDestroy {
     this.trackingByRouteId.set(route.id, {
       route,
       timer: null,
+      refreshing: false,
+      routeInvalidated: (route.mobilitySegments ?? []).length === 0,
       targetArrivalAt,
       appState: 'foreground',
       pollIntervalMs: this.defaultIntervalMs,
@@ -83,6 +88,9 @@ export class RealtimeUpdateScheduler implements OnModuleDestroy {
       void this.refreshRoute(routeId);
     }, state.pollIntervalMs);
     state.timer.unref();
+    // Refresh immediately on trip start/reroute; the interval handles the
+    // steady-state cadence after the first provider response.
+    void this.refreshRoute(routeId);
   }
 
   stopRouteTracking(routeId: string): void {
@@ -117,6 +125,9 @@ export class RealtimeUpdateScheduler implements OnModuleDestroy {
       void this.refreshRoute(routeId);
     }, nextInterval);
     state.timer.unref();
+    if (appState === 'foreground') {
+      void this.refreshRoute(routeId);
+    }
   }
 
   onRouteEvent(listener: (event: RouteTrackingEvent) => void): () => void {
@@ -136,22 +147,39 @@ export class RealtimeUpdateScheduler implements OnModuleDestroy {
       return null;
     }
 
-    const previousRoute = state.route;
-    const [nextRoute] = await this.transitRealtimeOrchestrator.applyRealtime([previousRoute]);
-    if (!nextRoute) {
-      return null;
+    // A slow provider response must not overlap with the next scheduler tick
+    // and multiply upstream traffic for the same tracked route.
+    if (state.refreshing) {
+      return state.route;
     }
+    state.refreshing = true;
 
-    state.route = nextRoute;
-    const tripId = this.tripIdByRouteId.get(routeId) ?? routeId;
-    this.eventBus.emit('ROUTE_UPDATED', {
-      tripId,
-      routeId,
-      reason: 'scheduler_refresh',
-    });
+    try {
+      const previousRoute = state.route;
+      const [nextRoute] = await this.transitRealtimeOrchestrator.applyRealtime([previousRoute]);
+      if (!nextRoute) {
+        return null;
+      }
 
-    this.detectAndEmitEvents(tripId, previousRoute, nextRoute);
-    return nextRoute;
+      // A stop/reroute can remove this state while the provider request is in
+      // flight. Do not publish a late response into a newer tracking session.
+      if (this.trackingByRouteId.get(routeId) !== state) {
+        return null;
+      }
+
+      state.route = nextRoute;
+      const tripId = this.tripIdByRouteId.get(routeId) ?? routeId;
+      this.eventBus.emit('ROUTE_UPDATED', {
+        tripId,
+        routeId,
+        reason: 'scheduler_refresh',
+      });
+
+      this.detectAndEmitEvents(tripId, previousRoute, nextRoute, state);
+      return nextRoute;
+    } finally {
+      state.refreshing = false;
+    }
   }
 
   onModuleDestroy(): void {
@@ -168,6 +196,7 @@ export class RealtimeUpdateScheduler implements OnModuleDestroy {
     tripId: string,
     previousRoute: MobilityRoute,
     nextRoute: MobilityRoute,
+    state: TrackingState,
   ): void {
     const previousEta = previousRoute.realtimeAdjustedDurationMinutes ?? previousRoute.estimatedTravelMinutes;
     const nextEta = nextRoute.realtimeAdjustedDurationMinutes ?? nextRoute.estimatedTravelMinutes;
@@ -226,7 +255,11 @@ export class RealtimeUpdateScheduler implements OnModuleDestroy {
       });
     }
 
-    if ((nextRoute.mobilitySegments ?? []).length === 0) {
+    const isInvalidated = (nextRoute.mobilitySegments ?? []).length === 0;
+    if (!isInvalidated) {
+      state.routeInvalidated = false;
+    } else if (!state.routeInvalidated) {
+      state.routeInvalidated = true;
       this.emitEvent({
         type: 'ROUTE_INVALIDATED',
         routeId: nextRoute.id,

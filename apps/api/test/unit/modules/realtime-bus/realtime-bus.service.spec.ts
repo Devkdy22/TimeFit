@@ -136,13 +136,13 @@ describe('RealtimeBusService', () => {
           failedProviders: [],
         },
       },
-      arrivals: { 'SEOUL:s1:r1': 4 },
+      arrivals: { 'SEOUL:s1:r1': 0 },
     });
 
     const result = await service.resolveEta(segment);
     expect(result.status).toBe('LIVE');
     expect(result.provider).toBe('SEOUL');
-    expect(result.etaMinutes).toBe(4);
+    expect(result.etaMinutes).toBe(0);
   });
 
   it('ARS 조회 성공 + routeName 불일치로 ROUTE_MISMATCH', async () => {

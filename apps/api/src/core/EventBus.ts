@@ -66,14 +66,16 @@ export interface AppEventPayloadMap {
     tripId: string;
     routeId: string;
     timestamp: number;
-    movement: {
+      movement: {
       currentSegmentIndex: number;
       progress: number;
+      routeProgress?: number;
       isOffRoute: boolean;
       nextAction: string;
       distanceFromRouteMeters: number;
-      matchingConfidence: number;
-    };
+        matchingConfidence: number;
+        matchedPoint?: { lat: number; lng: number };
+      };
   };
   OFF_ROUTE: {
     tripId: string;

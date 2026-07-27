@@ -155,4 +155,45 @@ describe('TripsController SSE', () => {
     expect(next).toHaveBeenCalledTimes(1);
     jest.useRealTimers();
   });
+
+  it('publishes route snapshots when a realtime route update is emitted', () => {
+    const eventBus = new EventBus();
+    const route = { id: 'r2', name: '갱신 경로', mobilitySegments: [{ mode: 'WALK' }] };
+    const controller = new TripsController(
+      {
+        getRouteCandidates: jest.fn(),
+        startTrip: jest.fn(),
+        updatePosition: jest.fn(),
+        stopTrip: jest.fn(),
+        getTrip: jest.fn(),
+        assertCanSubscribeToTrip: jest.fn(),
+        markSseConnected: jest.fn(),
+        markSseDisconnected: jest.fn(),
+        getReplayEvents: jest.fn().mockReturnValue([]),
+        getTripSnapshot: jest.fn().mockReturnValue({
+          route,
+          routeSummary: { status: '여유' },
+          movement: {},
+          status: '여유',
+          timestamp: new Date().toISOString(),
+        }),
+        getTrackedRouteId: jest.fn().mockReturnValue('r2'),
+      } as never,
+      eventBus,
+      { onSseConnected: jest.fn(), onSseDisconnected: jest.fn() } as never,
+      { begin: jest.fn(), complete: jest.fn(), clearPending: jest.fn() } as never,
+    );
+    const next = jest.fn();
+    const subscription = controller.events({ authUserId: 'u1' } as never, 'trip-1').subscribe({ next });
+
+    eventBus.emit('ROUTE_UPDATED', { tripId: 'trip-1', routeId: 'r2', reason: 'scheduler_refresh' });
+
+    expect(next).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        type: 'ROUTE_UPDATED',
+        data: expect.objectContaining({ route }),
+      }),
+    );
+    subscription.unsubscribe();
+  });
 });

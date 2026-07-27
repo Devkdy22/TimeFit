@@ -72,7 +72,9 @@ export class SubwayRealtimeProvider {
           matchingConfidence: 0.2,
           source: 'CACHE',
           reasonCode,
-          updatedAt: new Date().toISOString(),
+          // No provider payload was received, so this is not a data
+          // freshness timestamp. The UI should show that the time is unknown.
+          updatedAt: undefined,
         },
       };
     }
@@ -133,7 +135,7 @@ export class SubwayRealtimeProvider {
           matchingConfidence,
           source: hasPublicRealtime ? 'SEOUL_API' : 'CACHE',
           reasonCode: hasPublicRealtime ? undefined : 'SUBWAY_EMPTY_RESPONSE',
-          updatedAt: new Date().toISOString(),
+          updatedAt: hasPublicRealtime ? new Date().toISOString() : undefined,
         },
         candidates: (() => {
           const normalizeRoute = (value: string) => value.replace(/\s+/g, '').toUpperCase();
@@ -207,7 +209,6 @@ export class SubwayRealtimeProvider {
             ...cached.value.realtimeInfo,
             source: 'CACHE',
             reasonCode: 'CACHE_STALE_USED',
-            updatedAt: new Date().toISOString(),
           },
         };
       }
@@ -221,7 +222,7 @@ export class SubwayRealtimeProvider {
           matchingConfidence: 0.2,
           source: 'CACHE',
           reasonCode: 'SUBWAY_API_TIMEOUT',
-          updatedAt: new Date().toISOString(),
+          updatedAt: undefined,
         },
       };
     }

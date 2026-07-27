@@ -45,6 +45,7 @@ export function calculateRouteScore(input: RouteScoreInput): ScoredRoute {
   const walkingPenalty = input.route.walkingMinutes * 0.5 * input.preference.walkingPenaltyWeight;
   const delayPenalty = input.route.delayRisk * 50;
   const bufferPenalty = getBufferPenalty(bufferMinutes);
+  const preferredModePenalty = getPreferredModePenalty(input.route.routeType, input.preference.preferredMode);
 
   const baseScore = 100;
 
@@ -56,6 +57,7 @@ export function calculateRouteScore(input: RouteScoreInput): ScoredRoute {
         walkingPenalty -
         earlyArrivalPenalty -
         bufferPenalty -
+        preferredModePenalty -
         delayPenalty +
         punctuality +
         safety,
@@ -83,6 +85,17 @@ export function calculateRouteScore(input: RouteScoreInput): ScoredRoute {
     totalScore,
     riskLevel,
   };
+}
+
+function getPreferredModePenalty(
+  routeType: RouteCandidate['routeType'],
+  preferredMode: UserPreference['preferredMode'],
+): number {
+  if (!preferredMode || preferredMode === 'any') return 0;
+  if (preferredMode === 'mixed') return routeType === 'mixed' ? 0 : 8;
+  if (preferredMode === 'bus') return routeType === 'bus' || routeType === 'bus-heavy' ? 0 : 10;
+  if (preferredMode === 'subway') return routeType === 'subway' || routeType === 'subway-heavy' ? 0 : 10;
+  return routeType === 'walking-heavy' ? 0 : 10;
 }
 
 function getPunctualityScore(bufferMinutes: number): number {

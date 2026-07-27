@@ -13,6 +13,7 @@ import { generateNextAction, type NextActionResult } from '../../../domain/nextA
 import { computeTimeFitStatus } from '../../../domain/timefitStatus';
 import { KakaoMapClient } from '../../recommendation/integrations/kakao-map.client';
 import { TimeFitNotifier } from '../../recommendation/services/notification/TimeFitNotifier';
+import { NotificationService } from '../../notifications/services/notification.service';
 import {
   type CurrentPositionInput,
   type RealtimeStateInput,
@@ -21,8 +22,9 @@ import {
 import { RealtimeUpdateScheduler } from '../../recommendation/services/transit/RealtimeUpdateScheduler';
 import type { LocationInput, MobilityRoute } from '../../recommendation/types/recommendation.types';
 import { StartTripDto } from '../dto/start-trip.dto';
+import { TripAppStateDto } from '../dto/trip-app-state.dto';
 import { TripPositionDto } from '../dto/trip-position.dto';
-import type { TripEntity } from '../types/trip.types';
+import type { TripEntity, TripLiveStatus } from '../types/trip.types';
 import { TripsRepository } from './trips.repository';
 import { MetricsCollector } from './tracking/MetricsCollector';
 import { type MovementTrackingResult, MovementTracker } from './tracking/MovementTracker';
@@ -69,6 +71,7 @@ export class TripsService implements OnModuleDestroy {
     private readonly offRouteHandler: OffRouteHandler,
     private readonly metricsCollector: MetricsCollector,
     private readonly timeFitNotifier: TimeFitNotifier,
+    private readonly notificationService: NotificationService,
     private readonly eventBus: EventBus,
     private readonly logger: SafeLogger,
   ) {
@@ -85,6 +88,11 @@ export class TripsService implements OnModuleDestroy {
     this.subscriptions.push(
       this.eventBus.subscribe('RISK_LEVEL_CHANGED', (payload) => {
         void this.handleRouteEvent(payload.tripId, payload.routeId, 'risk_level_changed');
+      }),
+    );
+    this.subscriptions.push(
+      this.eventBus.subscribe('ROUTE_UPDATED', (payload) => {
+        this.syncSchedulerRoute(payload.tripId, payload.routeId);
       }),
     );
     this.subscriptions.push(
@@ -183,10 +191,12 @@ export class TripsService implements OnModuleDestroy {
   updatePosition(tripId: string, input: TripPositionDto, authenticatedUserId?: string): {
     currentSegmentIndex: number;
     progress: number;
+    routeProgress?: number;
     isOffRoute: boolean;
     nextAction: string;
     distanceFromRouteMeters: number;
     matchingConfidence: number;
+    matchedPoint?: { lat: number; lng: number };
     ignored?: boolean;
     reason?: string;
   } {
@@ -255,6 +265,7 @@ export class TripsService implements OnModuleDestroy {
     const movement = this.movementTracker.evaluate({
       currentPosition: active.currentPosition,
       segments: active.currentRoute.mobilitySegments ?? [],
+      previousMovement: active.movement,
     });
 
     const accuracy = input.accuracy ?? 0;
@@ -279,8 +290,18 @@ export class TripsService implements OnModuleDestroy {
       timestamp: input.timestamp,
       movement,
     });
+    this.notifyLiveTrip(tripId, active);
 
     return movement;
+  }
+
+  setAppState(tripId: string, input: TripAppStateDto, authenticatedUserId: string): {
+    tripId: string;
+    appState: TripAppStateDto['appState'];
+  } {
+    const active = this.getOwnedActiveTrip(authenticatedUserId, tripId);
+    this.realtimeUpdateScheduler.setAppState(active.currentRoute.id, input.appState);
+    return { tripId, appState: input.appState };
   }
 
   stopTrip(tripId: string, authenticatedUserId?: string): { stopped: boolean; tripId: string } {
@@ -343,6 +364,7 @@ export class TripsService implements OnModuleDestroy {
     movement: {
       currentSegmentIndex: number;
       progress: number;
+      routeProgress: number;
       nextAction: string;
       distanceFromRouteMeters: number;
       isOffRoute: boolean;
@@ -362,6 +384,7 @@ export class TripsService implements OnModuleDestroy {
       movement: {
         currentSegmentIndex: active.movement.currentSegmentIndex,
         progress: active.movement.progress,
+        routeProgress: active.movement.routeProgress ?? active.movement.progress,
         nextAction: active.nextAction.title,
         distanceFromRouteMeters: active.movement.distanceFromRouteMeters,
         isOffRoute: active.movement.isOffRoute,
@@ -383,6 +406,7 @@ export class TripsService implements OnModuleDestroy {
         'ETA_CHANGED',
         'STATUS_CHANGED',
         'ROUTE_SWITCHED',
+        'ROUTE_UPDATED',
         'POSITION_UPDATED',
         'OFF_ROUTE',
       ],
@@ -590,13 +614,53 @@ export class TripsService implements OnModuleDestroy {
       nextDelayMinutes: active.delayMinutes,
     });
 
+    let rerouteOccurred = false;
     if (
       reason === 'delay_increased' ||
       reason === 'risk_level_changed' ||
       reason === 'route_invalidated'
     ) {
+      const rerouteCountBefore = active.rerouteCount;
       await this.evaluateReroute(tripId, active, reason, false);
+      rerouteOccurred = active.rerouteCount > rerouteCountBefore;
     }
+    this.notifyLiveTrip(tripId, active, rerouteOccurred);
+  }
+
+  /**
+   * Keep the SSE snapshot in sync with a provider refresh before the
+   * controller publishes the ROUTE_UPDATED event. The scheduler owns the
+   * polling cadence, while the active trip owns the client-facing snapshot.
+   */
+  private syncSchedulerRoute(tripId: string, routeId: string): void {
+    const active = this.activeTripById.get(tripId);
+    if (!active || active.currentRoute.id !== routeId) {
+      return;
+    }
+
+    const refreshedRoute = this.realtimeUpdateScheduler.getTrackedRoute(routeId);
+    if (!refreshedRoute || refreshedRoute === active.currentRoute) {
+      return;
+    }
+
+    active.currentRoute = refreshedRoute;
+    active.delayMinutes = this.computeDelayMinutes(refreshedRoute);
+    active.lastActivityAt = Date.now();
+
+    const movement = this.movementTracker.evaluate({
+      currentPosition: active.currentPosition,
+      segments: refreshedRoute.mobilitySegments ?? [],
+    });
+    active.movement = movement;
+
+    const segment = refreshedRoute.mobilitySegments?.[movement.currentSegmentIndex];
+    active.nextAction = generateNextAction(segment, movement.progress, segment?.realtimeInfo, {
+      departureInMinutes: active.bufferMinutes,
+    });
+
+    const status = computeTimeFitStatus(refreshedRoute, active.targetArrivalTime);
+    active.status = status.status;
+    active.bufferMinutes = status.bufferMinutes;
   }
 
   private async handleOffRoute(tripId: string, routeId: string): Promise<void> {
@@ -605,7 +669,31 @@ export class TripsService implements OnModuleDestroy {
       return;
     }
 
+    const rerouteCountBefore = active.rerouteCount;
     await this.evaluateReroute(tripId, active, 'off_route', true);
+    this.notifyLiveTrip(tripId, active, active.rerouteCount > rerouteCountBefore);
+  }
+
+  private notifyLiveTrip(tripId: string, active: ActiveTripState, rerouteOccurred = false): void {
+    const trip = this.tripsRepository.findById(tripId);
+    const remainingMinutes = Math.floor((new Date(active.targetArrivalTime).getTime() - Date.now()) / 60_000);
+    const currentStatus: TripLiveStatus = remainingMinutes < 0 ? '위험' : active.status;
+    void this.notificationService.handleTripLiveNotification({
+      trip,
+      currentStatus,
+      remainingMinutes,
+      estimatedArrivalAt: trip.expectedArrivalAt,
+      delayMinutes: active.delayMinutes,
+      rerouteOccurred,
+      rerouteCount: active.rerouteCount,
+      nextRouteId: active.currentRoute.id,
+    }).catch((error: unknown) => {
+      this.logger.warn({
+        event: 'trip.notification.processing_failed',
+        tripId,
+        reason: error instanceof Error ? error.message : 'unknown_error',
+      }, TripsService.name);
+    });
   }
 
   private async evaluateReroute(
@@ -664,9 +752,21 @@ export class TripsService implements OnModuleDestroy {
     active.lastActivityAt = Date.now();
     this.tripIdByRouteId.set(result.nextBestRoute.id, tripId);
 
+    // A reroute starts a new geometry coordinate space. Re-match the last
+    // known position without carrying the old route's monotonic progress into
+    // the new route.
+    active.movement = this.movementTracker.evaluate({
+      currentPosition: active.currentPosition,
+      segments: result.nextBestRoute.mobilitySegments ?? [],
+    });
+
     const status = computeTimeFitStatus(result.nextBestRoute, active.targetArrivalTime);
     active.status = status.status;
     active.bufferMinutes = status.bufferMinutes;
+    const reroutedSegment = result.nextBestRoute.mobilitySegments?.[active.movement.currentSegmentIndex];
+    active.nextAction = generateNextAction(reroutedSegment, active.movement.progress, reroutedSegment?.realtimeInfo, {
+      departureInMinutes: active.bufferMinutes,
+    });
 
     this.realtimeUpdateScheduler.upsertTrackedRoute(result.nextBestRoute, tripId, active.targetArrivalTime);
     this.realtimeUpdateScheduler.startRouteTracking(result.nextBestRoute.id);

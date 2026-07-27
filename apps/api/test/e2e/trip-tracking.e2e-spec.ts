@@ -2,7 +2,7 @@ import { ConflictException, INestApplication, UnauthorizedException } from '@nes
 import { Test } from '@nestjs/testing';
 import { createHash, randomUUID } from 'crypto';
 import request from 'supertest';
-import { firstValueFrom, take, toArray } from 'rxjs';
+import { firstValueFrom, take, takeWhile, toArray } from 'rxjs';
 import { AppModule } from '../../src/app.module';
 import { EventBus } from '../../src/core/EventBus';
 import { AuthService } from '../../src/modules/auth/auth.service';
@@ -14,9 +14,16 @@ import { TripsService } from '../../src/modules/trips/services/trips.service';
 import { ReRoutingEngine } from '../../src/modules/recommendation/services/transit/ReRoutingEngine';
 
 function seedEnv() {
+  const databaseUrl = process.env.TIMEFIT_E2E_DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error('TIMEFIT_E2E_DATABASE_URL must be set to an isolated test database before running trip E2E.');
+  }
+  if (!/timefit.*(test|e2e)|(test|e2e).*timefit/i.test(databaseUrl)) {
+    throw new Error('TIMEFIT_E2E_DATABASE_URL must point to a test database.');
+  }
   process.env.NODE_ENV = 'test';
   process.env.PORT = '3000';
-  process.env.DATABASE_URL = 'postgresql://postgres:postgres@localhost:5432/timefit';
+  process.env.DATABASE_URL = databaseUrl;
   process.env.JWT_ACCESS_SECRET = 'a'.repeat(40);
   process.env.JWT_REFRESH_SECRET = 'b'.repeat(40);
   process.env.KAKAO_API_KEY = 'k';
@@ -129,7 +136,9 @@ function stableStringify(input: unknown): string {
     .join(',')}}`;
 }
 
-describe('Trip Tracking E2E', () => {
+const describeIfIsolatedDatabase = process.env.TIMEFIT_E2E_DATABASE_URL ? describe : describe.skip;
+
+describeIfIsolatedDatabase('Trip Tracking E2E', () => {
   let app: INestApplication;
   let eventBus: EventBus;
   let tripsController: TripsController;
@@ -210,6 +219,9 @@ describe('Trip Tracking E2E', () => {
 
     app = moduleRef.createNestApplication();
     await app.init();
+    // Bind explicitly to loopback so Supertest does not attempt its default
+    // 0.0.0.0 listener in restricted CI/sandbox environments.
+    await app.listen(0, '127.0.0.1');
     api = request(app.getHttpServer());
 
     eventBus = app.get(EventBus);
@@ -219,7 +231,7 @@ describe('Trip Tracking E2E', () => {
   });
 
   afterAll(async () => {
-    await app.close();
+    await app?.close();
   });
 
   it('1) normal flow: /routes -> /trips/start -> /position', async () => {
@@ -234,6 +246,13 @@ describe('Trip Tracking E2E', () => {
     expect(startRes.status).toBe(201);
     const tripId = startRes.body.data.tripId as string;
 
+    const appStateRes = await api
+      .post(`/trips/${tripId}/app-state`)
+      .set(authHeaderA)
+      .send({ appState: 'background' });
+    expect(appStateRes.status).toBe(201);
+    expect(appStateRes.body.data).toEqual({ tripId, appState: 'background' });
+
     const positionRes = await api
       .post(`/trips/${tripId}/position`)
       .set(authHeaderA)
@@ -241,10 +260,12 @@ describe('Trip Tracking E2E', () => {
 
     expect(positionRes.status).toBe(201);
     expect(positionRes.body.data).toHaveProperty('progress');
+    expect(positionRes.body.data).toHaveProperty('routeProgress');
 
     const tripRes = await api.get(`/trips/${tripId}`).set(authHeaderA);
     expect(tripRes.status).toBe(200);
     expect(tripRes.body.data).toHaveProperty('status');
+    expect(tripRes.body.data).toHaveProperty('movement.routeProgress');
     expect(tripRes.body.data.trip.userId).toBe('trip-user-a');
   });
 
@@ -302,6 +323,7 @@ describe('Trip Tracking E2E', () => {
   it('4) SSE reconnect replay + INIT (mock event stream)', async () => {
     const startRes = await startTripAsUserA();
     const tripId = startRes.body.data.tripId as string;
+    const replayCursor = eventBus.getEventsAfter(0).at(-1)?.eventId ?? 0;
 
     eventBus.emit('ETA_CHANGED', {
       tripId,
@@ -310,7 +332,7 @@ describe('Trip Tracking E2E', () => {
       nextEtaMinutes: 25,
     });
 
-    const history = eventBus.getEventsAfter(0, {
+    const history = eventBus.getEventsAfter(replayCursor, {
       eventNames: ['ETA_CHANGED'],
       filter: (envelope) => (envelope.payload as { tripId?: string }).tripId === tripId,
       limit: 1,
@@ -321,12 +343,12 @@ describe('Trip Tracking E2E', () => {
     const stream = tripsController.events(
       { authUserId: 'trip-user-a' } as never,
       tripId,
-      String((last?.eventId ?? 0) - 1),
+      String(replayCursor),
     );
-    const events = await firstValueFrom(stream.pipe(take(2), toArray()));
+    const events = await firstValueFrom(stream.pipe(takeWhile((event) => event.type !== 'INIT', true), toArray()));
 
     expect(events[0]?.type).toBe('ETA_CHANGED');
-    expect(events[1]?.type).toBe('INIT');
+    expect(events.at(-1)?.type).toBe('INIT');
   });
 
   it('5) lifecycle: 10min inactivity closes active tracking', async () => {
@@ -391,6 +413,12 @@ describe('Trip Tracking E2E', () => {
       .set(authHeaderB)
       .send({ lat: 37.5002, lng: 127.0002, timestamp: Date.now() + 5000 });
     expect(userBPosition.status).toBe(403);
+
+    const userBAppState = await api
+      .post(`/trips/${tripId}/app-state`)
+      .set(authHeaderB)
+      .send({ appState: 'background' });
+    expect(userBAppState.status).toBe(403);
 
     const userBSse = await api.get(`/trips/${tripId}/events`).set(authHeaderB);
     expect(userBSse.status).toBe(403);

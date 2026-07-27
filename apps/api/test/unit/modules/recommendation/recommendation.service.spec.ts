@@ -21,38 +21,11 @@ describe('RecommendationService', () => {
         .mockResolvedValue(
           routeResponse ?? {
               source: 'fallback',
-              status: 'OK',
+              status: 'PROVIDER_UNAVAILABLE',
               fetchedAt: '2026-04-07T00:00:00.000Z',
               cacheableForMs: 45_000,
-            candidates: [
-              {
-                id: 'fallback-1',
-                name: 'fallback',
-                source: 'fallback',
-                estimatedTravelMinutes: 22,
-                delayRisk: 0.15,
-                transferCount: 0,
-                walkingMinutes: 2,
-              },
-              {
-                id: 'fallback-2',
-                name: 'fallback-2',
-                source: 'fallback',
-                estimatedTravelMinutes: 24,
-                delayRisk: 0.2,
-                transferCount: 1,
-                walkingMinutes: 3,
-              },
-              {
-                id: 'fallback-3',
-                name: 'fallback-3',
-                source: 'fallback',
-                estimatedTravelMinutes: 26,
-                delayRisk: 0.25,
-                transferCount: 1,
-                walkingMinutes: 4,
-              },
-            ],
+            candidates: [],
+            providerErrorCode: 'PROVIDER_UNAVAILABLE',
           } satisfies NormalizedRouteDto,
         ),
     };
@@ -164,7 +137,31 @@ describe('RecommendationService', () => {
     expect(result.primaryRoute.route.source).toBe('api');
   });
 
-  it('returns fallback recommendation when realtime api routes are unavailable', async () => {
+  it('uses a deterministic route id tie-breaker for equal candidates', async () => {
+    const { service } = createService();
+    const candidate = (id: string) => ({
+      id,
+      name: id,
+      source: 'api' as const,
+      estimatedTravelMinutes: 30,
+      delayRisk: 0.1,
+      transferCount: 0,
+      walkingMinutes: 5,
+    });
+
+    const result = await service.recommend({
+      origin: { name: 'A', lat: 37.5, lng: 127.0 },
+      destination: { name: 'B', lat: 37.6, lng: 127.1 },
+      arrivalAt: new Date('2099-01-01T00:00:00.000Z').toISOString(),
+      candidateRoutes: [candidate('route-z'), candidate('route-a'), candidate('route-m')],
+    });
+
+    if (!('primaryRoute' in result)) throw new Error('Expected recommendation result');
+    expect(result.primaryRoute.route.id).toBe('route-a');
+    expect(result.alternatives.map((item) => item.route.id)).toEqual(['route-m', 'route-z']);
+  });
+
+  it('returns an explicit provider-unavailable state when realtime routes are unavailable', async () => {
     const { service } = createService();
 
     const result = await service.recommend({
@@ -179,22 +176,22 @@ describe('RecommendationService', () => {
       },
     });
 
-    if (!('primaryRoute' in result)) {
-      throw new Error('Expected recommendation result with primaryRoute');
+    expect('emptyState' in result).toBe(true);
+    if ('emptyState' in result) {
+      expect(result.emptyState.status).toBe('PROVIDER_UNAVAILABLE');
     }
-    expect(result.primaryRoute.route.source).toBe('fallback');
-    expect(result.alternatives.length).toBeGreaterThan(0);
   });
 
   it('does not throw 503 when route status is NO_RESULT', async () => {
     const { service } = createService({
       source: 'api',
-      status: 'NO_RESULT',
+      status: 'ROUTE_NOT_FOUND',
       fetchedAt: '2026-04-07T00:00:00.000Z',
       cacheableForMs: 45_000,
       candidates: [],
       emptyState: {
-        code: 'ROUTE_NO_RESULT',
+        code: 'ROUTE_NOT_FOUND',
+        status: 'ROUTE_NOT_FOUND',
         title: '추천 가능한 경로가 없습니다',
         description: '출발지와 도착지를 다시 확인하거나 도착 시간을 조정해 주세요.',
         retryable: true,

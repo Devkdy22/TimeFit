@@ -19,6 +19,7 @@ import { type AppEventEnvelope, EventBus } from '../../core/EventBus';
 import { AuthAccessGuard, type AuthenticatedRequest } from '../auth/auth-access.guard';
 import { RouteCandidatesDto } from './dto/route-candidates.dto';
 import { StartTripDto } from './dto/start-trip.dto';
+import { TripAppStateDto } from './dto/trip-app-state.dto';
 import { StopTripDto } from './dto/stop-trip.dto';
 import { TripPositionDto } from './dto/trip-position.dto';
 import { TripPositionRateLimitGuard } from './guards/trip-position-rate-limit.guard';
@@ -89,6 +90,18 @@ export class TripsController {
     );
   }
 
+  @Post('trips/:id/app-state')
+  @UseGuards(AuthAccessGuard)
+  setAppState(
+    @Req() request: AuthenticatedRequest,
+    @Param('id') tripId: string,
+    @Body() body: TripAppStateDto,
+  ) {
+    return ApiResponse.ok(
+      this.tripsService.setAppState(tripId, body, this.requireAuthUserId(request)),
+    );
+  }
+
   @Post('trips/stop')
   @UseGuards(AuthAccessGuard)
   stop(@Req() request: AuthenticatedRequest, @Body() body: StopTripDto) {
@@ -147,6 +160,9 @@ export class TripsController {
             this.publishIfTripMatched(subscriber, tripId, envelope);
           }),
           this.eventBus.subscribeWithMeta('ROUTE_SWITCHED', (envelope) => {
+            this.publishIfTripMatched(subscriber, tripId, envelope);
+          }),
+          this.eventBus.subscribeWithMeta('ROUTE_UPDATED', (envelope) => {
             this.publishIfTripMatched(subscriber, tripId, envelope);
           }),
           this.eventBus.subscribeWithMeta('POSITION_UPDATED', (envelope) => {
@@ -273,6 +289,17 @@ export class TripsController {
           ...base,
           oldRouteId: payload.previousRouteId,
           newRoute: snapshot.route,
+        },
+      };
+    }
+
+    if (envelope.eventName === 'ROUTE_UPDATED') {
+      return {
+        id: String(envelope.eventId),
+        type: 'ROUTE_UPDATED',
+        data: {
+          ...base,
+          route: snapshot.route,
         },
       };
     }

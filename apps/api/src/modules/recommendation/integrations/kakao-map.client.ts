@@ -27,6 +27,7 @@ export class KakaoMapClient {
         candidates: [],
         emptyState: {
           code: 'ROUTE_INVALID_INPUT',
+          status: 'INVALID_INPUT',
           title: '출발지 또는 도착지 좌표가 올바르지 않습니다',
           description: '출발지와 도착지 위치를 다시 확인해 주세요.',
           retryable: false,
@@ -36,25 +37,36 @@ export class KakaoMapClient {
 
     const odsay = await this.odsayTransitClient.fetchTransitRoutes(origin, destination);
 
-    if (odsay.status === 'PROVIDER_TIMEOUT') {
+    if (odsay.status === 'PROVIDER_TIMEOUT' || odsay.status === 'PROVIDER_DOWN') {
       return {
         source: 'fallback',
-        status: 'PROVIDER_TIMEOUT',
+        status: 'ROUTE_PROVIDER_DOWN',
         fetchedAt: odsay.fetchedAt,
         cacheableForMs: odsay.cacheableForMs,
         candidates: [],
-        providerErrorCode: 'ROUTE_PROVIDER_TIMEOUT',
+        providerErrorCode: odsay.status === 'PROVIDER_TIMEOUT' ? 'ROUTE_PROVIDER_TIMEOUT' : 'ROUTE_PROVIDER_DOWN',
       };
     }
 
-    if (odsay.status === 'PROVIDER_DOWN') {
+    if (odsay.status === 'PROVIDER_UNAVAILABLE') {
       return {
         source: 'fallback',
-        status: 'PROVIDER_DOWN',
+        status: 'PROVIDER_UNAVAILABLE',
         fetchedAt: odsay.fetchedAt,
         cacheableForMs: odsay.cacheableForMs,
         candidates: [],
-        providerErrorCode: 'ROUTE_PROVIDER_DOWN',
+        providerErrorCode: 'PROVIDER_UNAVAILABLE',
+      };
+    }
+
+    if (odsay.status === 'APPLICATION_ERROR') {
+      return {
+        source: 'fallback',
+        status: 'APPLICATION_ERROR',
+        fetchedAt: odsay.fetchedAt,
+        cacheableForMs: odsay.cacheableForMs,
+        candidates: [],
+        providerErrorCode: 'APPLICATION_ERROR',
       };
     }
 
@@ -67,6 +79,7 @@ export class KakaoMapClient {
         candidates: [],
         emptyState: {
           code: 'ROUTE_INVALID_INPUT',
+          status: 'INVALID_INPUT',
           title: '경로 검색 조건이 올바르지 않습니다',
           description: '출발지/도착지 입력을 확인해 주세요.',
           retryable: false,
@@ -77,12 +90,13 @@ export class KakaoMapClient {
     if (odsay.status === 'NO_RESULT') {
       return {
         source: 'api',
-        status: 'NO_RESULT',
+        status: 'ROUTE_NOT_FOUND',
         fetchedAt: odsay.fetchedAt,
         cacheableForMs: odsay.cacheableForMs,
         candidates: [],
         emptyState: {
-          code: 'ROUTE_NO_RESULT',
+          code: 'ROUTE_NOT_FOUND',
+          status: 'ROUTE_NOT_FOUND',
           title: '추천 가능한 경로가 없습니다',
           description: '출발지와 도착지를 다시 확인하거나 도착 시간을 조정해 주세요.',
           retryable: true,
@@ -106,13 +120,14 @@ export class KakaoMapClient {
 
       return {
         source: 'fallback',
-        status: 'MAPPING_FAILED',
+        status: 'APPLICATION_ERROR',
         fetchedAt: odsay.fetchedAt,
         cacheableForMs: odsay.cacheableForMs,
         candidates: [],
         diagnostics: mapping.diagnostics,
         emptyState: {
           code: 'ROUTE_EMPTY_AFTER_MAPPING',
+          status: 'APPLICATION_ERROR',
           title: '추천 가능한 경로가 없습니다',
           description: '경로를 해석할 수 없어 다시 시도해 주세요.',
           retryable: true,

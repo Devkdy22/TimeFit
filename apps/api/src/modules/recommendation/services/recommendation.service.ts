@@ -1,6 +1,5 @@
 import {
   Injectable,
-  GatewayTimeoutException,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { MemoryTtlCacheService } from '../../../common/cache/memory-ttl-cache.service';
@@ -63,6 +62,7 @@ export class RecommendationService {
       preferredBufferMinutes: input.userPreference?.preferredBufferMinutes ?? 4,
       transferPenaltyWeight: input.userPreference?.transferPenaltyWeight ?? 1,
       walkingPenaltyWeight: input.userPreference?.walkingPenaltyWeight ?? 1,
+      preferredMode: input.userPreference?.preferredMode ?? 'any',
     };
 
     const requestId = `${Date.now()}-${Math.round(Math.random() * 1_000_000)}`;
@@ -79,11 +79,14 @@ export class RecommendationService {
       }
       throw error;
     }
-    if (routeResult.status === 'NO_RESULT' || routeResult.status === 'MAPPING_FAILED') {
+    if (routeResult.status === 'ROUTE_NOT_FOUND' || routeResult.status === 'APPLICATION_ERROR') {
       const emptyState = routeResult.emptyState ?? {
-        code: 'ROUTE_NO_RESULT',
-        title: '추천 가능한 경로가 없습니다',
-        description: '출발지와 도착지를 다시 확인하거나 도착 시간을 조정해 주세요.',
+        code: routeResult.status === 'APPLICATION_ERROR' ? 'APPLICATION_ERROR' : 'ROUTE_NOT_FOUND',
+        status: routeResult.status,
+        title: routeResult.status === 'APPLICATION_ERROR' ? '경로를 처리하지 못했습니다' : '추천 가능한 경로가 없습니다',
+        description: routeResult.status === 'APPLICATION_ERROR'
+          ? '경로 응답을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.'
+          : '출발지와 도착지를 다시 확인하거나 도착 시간을 조정해 주세요.',
         retryable: true,
       };
 
@@ -95,20 +98,16 @@ export class RecommendationService {
       return result;
     }
 
-    if (routeResult.status === 'PROVIDER_TIMEOUT') {
-      throw new GatewayTimeoutException({
-        code: 'ROUTE_PROVIDER_TIMEOUT',
-        message: '실시간 경로 조회 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.',
-      });
-    }
-
-    if (routeResult.status === 'PROVIDER_DOWN') {
+    if (routeResult.status === 'ROUTE_PROVIDER_DOWN' || routeResult.status === 'PROVIDER_UNAVAILABLE') {
       const result: RecommendationEmptyResult = {
         routes: [],
         emptyState: {
-          code: 'ROUTE_NO_RESULT',
-          title: '경로 제공 설정이 필요합니다',
-          description: '경로 공급자 설정이 없어 실시간 경로를 계산할 수 없습니다.',
+          code: routeResult.status,
+          status: routeResult.status,
+          title: routeResult.status === 'PROVIDER_UNAVAILABLE' ? '경로 제공 설정이 필요합니다' : '경로 제공자를 사용할 수 없습니다',
+          description: routeResult.status === 'PROVIDER_UNAVAILABLE'
+            ? '경로 공급자 설정이 없어 실시간 경로를 계산할 수 없습니다.'
+            : '경로 공급자에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.',
           retryable: false,
         },
         diagnostics: routeResult.diagnostics,
@@ -119,6 +118,7 @@ export class RecommendationService {
     if (routeResult.status === 'INVALID_INPUT') {
       throw new UnprocessableEntityException({
         code: 'ROUTE_INVALID_INPUT',
+        status: 'INVALID_INPUT',
         message: '경로 검색 입력값을 확인해 주세요.',
         details: routeResult.emptyState,
       });
@@ -129,6 +129,7 @@ export class RecommendationService {
         routes: [],
         emptyState: {
           code: 'ROUTE_EMPTY_AFTER_MAPPING',
+          status: 'APPLICATION_ERROR',
           title: '추천 가능한 경로가 없습니다',
           description: '경로를 해석할 수 없어 다시 시도해 주세요.',
           retryable: true,
@@ -685,9 +686,27 @@ export class RecommendationService {
     value: RouteCandidate[];
     cacheHit: boolean;
     freshness: number;
-    status: 'OK' | 'NO_RESULT' | 'MAPPING_FAILED' | 'PROVIDER_TIMEOUT' | 'PROVIDER_DOWN' | 'INVALID_INPUT';
+    status:
+      | 'OK'
+      | 'ROUTE_PROVIDER_DOWN'
+      | 'PROVIDER_UNAVAILABLE'
+      | 'ROUTE_NOT_FOUND'
+      | 'APPLICATION_ERROR'
+      | 'INVALID_INPUT';
     emptyState?: {
-      code: 'ROUTE_NO_RESULT' | 'ROUTE_EMPTY_AFTER_MAPPING' | 'ROUTE_INVALID_INPUT';
+      code:
+        | 'ROUTE_NOT_FOUND'
+        | 'ROUTE_EMPTY_AFTER_MAPPING'
+        | 'ROUTE_INVALID_INPUT'
+        | 'ROUTE_PROVIDER_DOWN'
+        | 'PROVIDER_UNAVAILABLE'
+        | 'APPLICATION_ERROR';
+      status:
+        | 'ROUTE_NOT_FOUND'
+        | 'ROUTE_PROVIDER_DOWN'
+        | 'PROVIDER_UNAVAILABLE'
+        | 'APPLICATION_ERROR'
+        | 'INVALID_INPUT';
       title: string;
       description: string;
       retryable: boolean;
@@ -873,7 +892,11 @@ export class RecommendationService {
         return b.totalScore - a.totalScore;
       }
 
-      return b.bufferMinutes - a.bufferMinutes;
+      if (b.bufferMinutes !== a.bufferMinutes) {
+        return b.bufferMinutes - a.bufferMinutes;
+      }
+
+      return a.route.id.localeCompare(b.route.id);
     });
   }
 

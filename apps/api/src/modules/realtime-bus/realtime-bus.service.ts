@@ -94,7 +94,9 @@ export class RealtimeBusService {
           routeId: candidate.route.routeId,
         });
 
-        if (!arrival?.etaMinutes) {
+        // Zero minutes is a valid "arriving now" response, not an empty
+        // provider response.
+        if (arrival?.etaMinutes == null) {
           if (candidate.provider === 'SEOUL') {
             const probe = await this.seoulBusClient.probeStationUid(
               candidate.station.stationId,
@@ -169,7 +171,7 @@ export class RealtimeBusService {
             stationId: mappingCached.providerStationId,
             routeId: mappingCached.providerRouteId,
           });
-          if (arrival?.etaMinutes) {
+          if (arrival?.etaMinutes != null) {
             const result: ResolvedRealtimeBus = {
               status: arrival.etaMinutes >= 8 ? 'DELAYED' : 'LIVE',
               etaMinutes: arrival.etaMinutes,
@@ -359,7 +361,7 @@ export class RealtimeBusService {
           stationId: startStationId,
           routeId: busRouteId,
         });
-        if (!arrival?.etaMinutes) {
+        if (arrival?.etaMinutes == null) {
           continue;
         }
         const result: ResolvedRealtimeBus = {

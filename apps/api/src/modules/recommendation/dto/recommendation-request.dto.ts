@@ -141,6 +141,10 @@ class UserPreferenceDto {
   @IsNumber()
   @Min(0)
   walkingPenaltyWeight!: number;
+
+  @IsOptional()
+  @IsIn(['any', 'walk', 'bus', 'subway', 'mixed'])
+  preferredMode?: 'any' | 'walk' | 'bus' | 'subway' | 'mixed';
 }
 
 export class RecommendationRequestDto {

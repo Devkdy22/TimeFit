@@ -19,7 +19,6 @@ export class EtaFallbackStrategy {
         status: 'STALE',
         source: 'CACHE',
         reasonCode: 'CACHE_STALE_USED',
-        updatedAt: now,
       };
     }
 
@@ -44,4 +43,3 @@ export class EtaFallbackStrategy {
     };
   }
 }
-

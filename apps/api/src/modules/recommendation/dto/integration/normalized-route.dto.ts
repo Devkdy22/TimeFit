@@ -2,14 +2,21 @@ import type { RouteCandidate } from '../../types/recommendation.types';
 
 export type RouteResolutionStatus =
   | 'OK'
-  | 'NO_RESULT'
-  | 'MAPPING_FAILED'
-  | 'PROVIDER_TIMEOUT'
-  | 'PROVIDER_DOWN'
+  | 'ROUTE_PROVIDER_DOWN'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'ROUTE_NOT_FOUND'
+  | 'APPLICATION_ERROR'
   | 'INVALID_INPUT';
 
 export interface RouteEmptyState {
-  code: 'ROUTE_NO_RESULT' | 'ROUTE_EMPTY_AFTER_MAPPING' | 'ROUTE_INVALID_INPUT';
+  code:
+    | 'ROUTE_NOT_FOUND'
+    | 'ROUTE_EMPTY_AFTER_MAPPING'
+    | 'ROUTE_INVALID_INPUT'
+    | 'ROUTE_PROVIDER_DOWN'
+    | 'PROVIDER_UNAVAILABLE'
+    | 'APPLICATION_ERROR';
+  status: Exclude<RouteResolutionStatus, 'OK'>;
   title: string;
   description: string;
   retryable: boolean;

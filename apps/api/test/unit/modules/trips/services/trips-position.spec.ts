@@ -33,15 +33,18 @@ describe('TripsService position updates', () => {
 
   function createService() {
     const eventBus = new EventBus();
+    const notificationService = { handleTripLiveNotification: jest.fn().mockResolvedValue(undefined) };
+    const scheduler = {
+      upsertTrackedRoute: jest.fn(),
+      startRouteTracking: jest.fn(),
+      stopRouteTracking: jest.fn(),
+      setAppState: jest.fn(),
+      getTrackedRoute: jest.fn().mockReturnValue(route),
+    };
     const service = new TripsService(
       new TripsRepository(),
       { getRouteCandidates: jest.fn() } as never,
-      {
-        upsertTrackedRoute: jest.fn(),
-        startRouteTracking: jest.fn(),
-        stopRouteTracking: jest.fn(),
-        getTrackedRoute: jest.fn().mockReturnValue(route),
-      } as never,
+      scheduler as never,
       {
         evaluateReRoute: jest.fn().mockResolvedValue({
           keepCurrent: true,
@@ -62,6 +65,7 @@ describe('TripsService position updates', () => {
       {
         evaluate: jest.fn(),
       } as never,
+      notificationService as never,
       eventBus,
       new SafeLogger(),
     );
@@ -74,8 +78,38 @@ describe('TripsService position updates', () => {
       currentPosition: { lat: 37.5, lng: 127 },
     });
 
-    return { service, eventBus, tripId: started.tripId };
+    return { service, eventBus, notificationService, scheduler, tripId: started.tripId };
   }
+
+  it('synchronizes the active trip snapshot before publishing a scheduler route update', () => {
+    const { service, eventBus, scheduler, tripId } = createService();
+    const refreshedRoute: MobilityRoute = {
+      ...route,
+      id: route.id,
+      realtimeAdjustedDurationMinutes: 25,
+      mobilitySegments: [{ ...route.mobilitySegments![0], durationMinutes: 25 }],
+    };
+    scheduler.getTrackedRoute.mockReturnValue(refreshedRoute);
+
+    eventBus.emit('ROUTE_UPDATED', {
+      tripId,
+      routeId: route.id,
+      reason: 'scheduler_refresh',
+    });
+
+    expect(service.getTripSnapshot(tripId).route).toBe(refreshedRoute);
+    expect(service.getTripSnapshot(tripId).routeSummary.realtimeAdjustedDurationMinutes).toBe(25);
+  });
+
+  it('forwards an owned trip app state to the realtime scheduler', () => {
+    const { service, scheduler, tripId } = createService();
+
+    expect(service.setAppState(tripId, { appState: 'background' }, 'u1')).toEqual({
+      tripId,
+      appState: 'background',
+    });
+    expect(scheduler.setAppState).toHaveBeenCalledWith(route.id, 'background');
+  });
 
   it('debounces position updates within 1s', () => {
     const nowSpy = jest.spyOn(Date, 'now');
@@ -101,6 +135,19 @@ describe('TripsService position updates', () => {
 
     expect(second.ignored).toBe(true);
     expect(second.reason).toBe('debounced');
+    nowSpy.mockRestore();
+  });
+
+  it('forwards accepted positions to live notification processing', () => {
+    const nowSpy = jest.spyOn(Date, 'now');
+    let now = 1_700_000_300_000;
+    nowSpy.mockImplementation(() => now);
+    const { service, notificationService, tripId } = createService();
+
+    now += 1_100;
+    service.updatePosition(tripId, { lat: 37.5002, lng: 127.0002, timestamp: now });
+
+    expect(notificationService.handleTripLiveNotification).toHaveBeenCalledTimes(1);
     nowSpy.mockRestore();
   });
 

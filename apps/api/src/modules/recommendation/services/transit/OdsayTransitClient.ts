@@ -76,7 +76,7 @@ export class OdsayTransitClient {
         OdsayTransitClient.name,
       );
       await this.safeIncrementUsage(dateKey, { failedResponses: 1 });
-      return this.buildResult('PROVIDER_DOWN', [], {
+      return this.buildResult('PROVIDER_UNAVAILABLE', [], {
         code: -1,
         message: 'ODsay configuration missing',
       });
@@ -109,7 +109,7 @@ export class OdsayTransitClient {
       stale.staleUntil > now &&
       (response.status === 'PROVIDER_TIMEOUT' || response.status === 'PROVIDER_DOWN')
     ) {
-      await this.safeIncrementUsage(dateKey, { staleFallbackHits: 1, successResponses: 1 });
+      await this.safeIncrementUsage(dateKey, { staleFallbackHits: 1 });
       this.logger.warn(
         {
           event: 'odsay.response.stale_fallback',
@@ -118,10 +118,13 @@ export class OdsayTransitClient {
         },
         OdsayTransitClient.name,
       );
-      return this.withMeta(stale.value, {
+      return this.withMeta(
+        this.buildResult('PROVIDER_DOWN', stale.value.paths, response.error, response.providerHttpStatus),
+        {
         cacheHit: true,
         staleFallback: true,
-      });
+        },
+      );
     }
 
     await this.safeIncrementUsage(dateKey, { failedResponses: 1 });
@@ -225,6 +228,17 @@ export class OdsayTransitClient {
 
     if (!response.body) {
       return this.buildResult(response.status, [], response.error, response.httpStatus);
+    }
+
+    if (
+      !response.body ||
+      typeof response.body !== 'object' ||
+      (response.body.result?.path !== undefined && !Array.isArray(response.body.result.path))
+    ) {
+      return this.buildResult('APPLICATION_ERROR', [], {
+        code: -5,
+        message: 'ODsay response schema was invalid',
+      });
     }
 
     let parsedError = this.parseError(response.body);
@@ -393,7 +407,7 @@ export class OdsayTransitClient {
   } {
     if (typeof error === 'object' && error && 'type' in error && (error as { type?: string }).type === 'HTTP_ERROR') {
       const httpStatus = Number((error as { status?: number }).status);
-      const status: OdsayFetchStatus = httpStatus >= 500 ? 'PROVIDER_DOWN' : 'INVALID_INPUT';
+      const status: OdsayFetchStatus = httpStatus >= 500 ? 'PROVIDER_DOWN' : 'APPLICATION_ERROR';
       return {
         status,
         httpStatus,
@@ -410,6 +424,16 @@ export class OdsayTransitClient {
         error: {
           code: -2,
           message: 'ODsay request timeout',
+        },
+      };
+    }
+
+    if (error instanceof SyntaxError) {
+      return {
+        status: 'APPLICATION_ERROR',
+        error: {
+          code: -4,
+          message: 'ODsay response was not valid JSON',
         },
       };
     }

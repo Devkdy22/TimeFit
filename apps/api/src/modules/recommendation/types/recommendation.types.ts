@@ -105,6 +105,7 @@ export interface UserPreference {
   preferredBufferMinutes: number;
   transferPenaltyWeight: number;
   walkingPenaltyWeight: number;
+  preferredMode?: 'any' | 'walk' | 'bus' | 'subway' | 'mixed';
 }
 
 export type ScheduleState = '여유' | '주의' | '긴급' | '위험';
@@ -157,7 +158,19 @@ export interface RecommendationResult {
 }
 
 export interface RecommendationEmptyState {
-  code: 'ROUTE_NO_RESULT' | 'ROUTE_EMPTY_AFTER_MAPPING' | 'ROUTE_INVALID_INPUT';
+  code:
+    | 'ROUTE_NOT_FOUND'
+    | 'ROUTE_EMPTY_AFTER_MAPPING'
+    | 'ROUTE_INVALID_INPUT'
+    | 'ROUTE_PROVIDER_DOWN'
+    | 'PROVIDER_UNAVAILABLE'
+    | 'APPLICATION_ERROR';
+  status:
+    | 'ROUTE_NOT_FOUND'
+    | 'ROUTE_PROVIDER_DOWN'
+    | 'PROVIDER_UNAVAILABLE'
+    | 'APPLICATION_ERROR'
+    | 'INVALID_INPUT';
   title: string;
   description: string;
   retryable: boolean;

@@ -17,7 +17,8 @@ export class OffRouteHandler {
     const next = movement.isOffRoute ? previous + 1 : 0;
     this.consecutiveOffRouteByTrip.set(tripId, next);
 
-    if (next < this.minConfirmCount) {
+    const reachedConfirmation = previous < this.minConfirmCount && next >= this.minConfirmCount;
+    if (!reachedConfirmation) {
       return {
         shouldReroute: false,
         forced: false,

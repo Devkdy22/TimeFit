@@ -4,6 +4,7 @@ describe('EtaFallbackStrategy', () => {
   const strategy = new EtaFallbackStrategy();
 
   it('returns STALE when stale cache exists', () => {
+    const updatedAt = '2026-07-21T07:00:00.000Z';
     const result = strategy.apply({
       type: 'BUS',
       stale: {
@@ -12,7 +13,7 @@ describe('EtaFallbackStrategy', () => {
         etaMinutes: 4,
         source: 'SEOUL_API',
         reasonCode: null,
-        updatedAt: new Date().toISOString(),
+        updatedAt,
       },
       failureCount: 1,
       reasonCode: 'BUS_API_TIMEOUT',
@@ -21,6 +22,7 @@ describe('EtaFallbackStrategy', () => {
     expect(result.status).toBe('STALE');
     expect(result.etaMinutes).toBe(4);
     expect(result.reasonCode).toBe('CACHE_STALE_USED');
+    expect(result.updatedAt).toBe(updatedAt);
   });
 
   it('returns CHECKING before 3 failures when no stale cache', () => {

@@ -79,6 +79,8 @@ export type OdsayFetchStatus =
   | 'NO_RESULT'
   | 'PROVIDER_TIMEOUT'
   | 'PROVIDER_DOWN'
+  | 'PROVIDER_UNAVAILABLE'
+  | 'APPLICATION_ERROR'
   | 'INVALID_INPUT';
 
 export interface OdsayTransitRouteResult {
