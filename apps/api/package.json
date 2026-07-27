@@ -7,7 +7,7 @@
     "build": "nest build",
     "start": "node dist/main.js",
     "lint": "eslint src --ext .ts",
-    "test:unit": "jest --config jest.config.ts",
+    "test:unit": "jest --config jest.config.ts --runInBand",
     "test:e2e": "jest --config jest.e2e.config.ts",
     "test:e2e:postgres": "scripts/run-postgres-e2e.sh",
     "test:e2e:db": "scripts/run-postgres-e2e.sh",

@@ -121,6 +121,11 @@ model Preference {
   prepMinutes    Int      @default(10)
   bufferMinutes  Int      @default(8)
   quietArrival   Boolean  @default(false)
+  notificationEnabled       Boolean @default(true)
+  departureLeadMinutes      Int     @default(5)
+  delayNotificationEnabled  Boolean @default(true)
+  rerouteNotificationEnabled Boolean @default(true)
+  vibrationEnabled          Boolean @default(true)
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 
@@ -171,6 +176,10 @@ model Routine {
   destinationLng              Float
   weekdays                    Int[]
   arrivalTime                 String
+  timeMode                    String    @default("arrival")
+  bufferMinutes               Int       @default(0)
+  preferredMode               String    @default("any")
+  excludedDates               String[]  @default([])
   notificationEnabled         Boolean   @default(true)
   notificationMinutesBefore   Int       @default(10)
   favorite                    Boolean   @default(false)
@@ -196,6 +205,7 @@ model Trip {
   expectedArrivalAt    DateTime?
   plannedDurationMin   Int?
   delayOffsetMin       Int            @default(0)
+  expoPushToken        String?
   createdAt            DateTime       @default(now())
   updatedAt            DateTime       @updatedAt
 
@@ -210,15 +220,21 @@ model Notification {
   id           String   @id @default(cuid())
   userId       String
   tripId       String?
+  dedupKey     String?  @unique
+  eventType    String?
   channel      String   @default("push")
   status       String   @default("scheduled")
   scheduledAt  DateTime
   sentAt       DateTime?
+  providerTicketId String?
+  providerPushToken String?
+  receiptCheckedAt DateTime?
   createdAt    DateTime @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([providerTicketId, receiptCheckedAt])
 }
 
 model TrafficSnapshot {

@@ -2,11 +2,13 @@ import { Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsDateString,
   IsIn,
   IsNumber,
   IsObject,
   IsOptional,
   IsString,
+  Matches,
   Max,
   Min,
   ValidateNested,
@@ -87,7 +89,28 @@ export class CreateRoutineDto {
   weekdays!: number[];
 
   @IsString()
+  @Matches(/^(?:[01]\d|2[0-3]):[0-5]\d$/)
   arrivalTime!: string; // HH:mm
+
+  @IsOptional()
+  @IsIn(['arrival', 'departure'])
+  timeMode?: 'arrival' | 'departure';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(120)
+  bufferMinutes?: number;
+
+  @IsOptional()
+  @IsIn(['any', 'walk', 'bus', 'subway', 'mixed'])
+  preferredMode?: 'any' | 'walk' | 'bus' | 'subway' | 'mixed';
+
+  @IsOptional()
+  @IsArray()
+  @IsDateString({}, { each: true })
+  excludedDates?: string[];
 
   @IsOptional()
   @IsBoolean()
@@ -97,6 +120,7 @@ export class CreateRoutineDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @Max(120)
   notificationMinutesBefore?: number;
 
   @IsOptional()
@@ -143,7 +167,28 @@ export class UpdateRoutineDto {
 
   @IsOptional()
   @IsString()
+  @Matches(/^(?:[01]\d|2[0-3]):[0-5]\d$/)
   arrivalTime?: string;
+
+  @IsOptional()
+  @IsIn(['arrival', 'departure'])
+  timeMode?: 'arrival' | 'departure';
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  @Max(120)
+  bufferMinutes?: number;
+
+  @IsOptional()
+  @IsIn(['any', 'walk', 'bus', 'subway', 'mixed'])
+  preferredMode?: 'any' | 'walk' | 'bus' | 'subway' | 'mixed';
+
+  @IsOptional()
+  @IsArray()
+  @IsDateString({}, { each: true })
+  excludedDates?: string[];
 
   @IsOptional()
   @IsBoolean()
@@ -153,6 +198,7 @@ export class UpdateRoutineDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
+  @Max(120)
   notificationMinutesBefore?: number;
 
   @IsOptional()

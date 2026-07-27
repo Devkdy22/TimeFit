@@ -14,6 +14,10 @@ function createRoutineDb() {
     destinationLng: number;
     weekdays: number[];
     arrivalTime: string;
+    timeMode: 'arrival' | 'departure';
+    bufferMinutes: number;
+    preferredMode: 'any' | 'walk' | 'bus' | 'subway' | 'mixed';
+    excludedDates: string[];
     notificationEnabled: boolean;
     notificationMinutesBefore: number;
     favorite: boolean;
@@ -46,6 +50,10 @@ function createRoutineDb() {
             destinationLng: data.destinationLng as number,
             weekdays: data.weekdays as number[],
             arrivalTime: data.arrivalTime as string,
+            timeMode: data.timeMode as Row['timeMode'],
+            bufferMinutes: data.bufferMinutes as number,
+            preferredMode: data.preferredMode as Row['preferredMode'],
+            excludedDates: data.excludedDates as string[],
             notificationEnabled: data.notificationEnabled as boolean,
             notificationMinutesBefore: data.notificationMinutesBefore as number,
             favorite: data.favorite as boolean,
@@ -115,6 +123,10 @@ const baseInput = {
   destination: { name: '회사', lat: 37.2, lng: 127.2 },
   weekdays: [5, 1, 1],
   arrivalTime: '08:50',
+  timeMode: 'arrival' as const,
+  bufferMinutes: 10,
+  preferredMode: 'any' as const,
+  excludedDates: [],
   notificationEnabled: true,
   notificationMinutesBefore: 10,
   favorite: false,

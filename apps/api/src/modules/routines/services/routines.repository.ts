@@ -14,6 +14,10 @@ type RoutineRow = {
   destinationLng: number;
   weekdays: number[];
   arrivalTime: string;
+  timeMode: 'arrival' | 'departure';
+  bufferMinutes: number;
+  preferredMode: 'any' | 'walk' | 'bus' | 'subway' | 'mixed';
+  excludedDates: string[];
   notificationEnabled: boolean;
   notificationMinutesBefore: number;
   favorite: boolean;
@@ -40,6 +44,10 @@ type UpdateRoutineInput = Partial<
     | 'destination'
     | 'weekdays'
     | 'arrivalTime'
+    | 'timeMode'
+    | 'bufferMinutes'
+    | 'preferredMode'
+    | 'excludedDates'
     | 'notificationEnabled'
     | 'notificationMinutesBefore'
     | 'favorite'
@@ -83,6 +91,10 @@ export class RoutinesRepository {
         destinationLng: input.destination.lng,
         weekdays: this.normalizeWeekdays(input.weekdays),
         arrivalTime: input.arrivalTime,
+        timeMode: input.timeMode,
+        bufferMinutes: input.bufferMinutes,
+        preferredMode: input.preferredMode,
+        excludedDates: this.normalizeExcludedDates(input.excludedDates),
         notificationEnabled: input.notificationEnabled,
         notificationMinutesBefore: input.notificationMinutesBefore,
         favorite: input.favorite,
@@ -195,6 +207,18 @@ export class RoutinesRepository {
     if (input.arrivalTime !== undefined) {
       data.arrivalTime = input.arrivalTime;
     }
+    if (input.timeMode !== undefined) {
+      data.timeMode = input.timeMode;
+    }
+    if (input.bufferMinutes !== undefined) {
+      data.bufferMinutes = input.bufferMinutes;
+    }
+    if (input.preferredMode !== undefined) {
+      data.preferredMode = input.preferredMode;
+    }
+    if (input.excludedDates !== undefined) {
+      data.excludedDates = this.normalizeExcludedDates(input.excludedDates);
+    }
     if (input.notificationEnabled !== undefined) {
       data.notificationEnabled = input.notificationEnabled;
     }
@@ -218,6 +242,10 @@ export class RoutinesRepository {
 
   private normalizeWeekdays(weekdays: number[]): number[] {
     return [...new Set(weekdays)].sort((a, b) => a - b);
+  }
+
+  private normalizeExcludedDates(dates: string[]): string[] {
+    return [...new Set(dates.map((date) => date.slice(0, 10)))].sort();
   }
 
   private async getPrismaClient(): Promise<RoutineDbClient> {
@@ -255,6 +283,10 @@ export class RoutinesRepository {
       },
       weekdays: row.weekdays,
       arrivalTime: row.arrivalTime,
+      timeMode: row.timeMode,
+      bufferMinutes: row.bufferMinutes,
+      preferredMode: row.preferredMode,
+      excludedDates: row.excludedDates,
       notificationEnabled: row.notificationEnabled,
       notificationMinutesBefore: row.notificationMinutesBefore,
       favorite: row.favorite,

@@ -14,6 +14,10 @@ export interface RoutineEntity {
   destination: RoutineLocation;
   weekdays: number[]; // 0(Sun) ~ 6(Sat)
   arrivalTime: string; // HH:mm
+  timeMode: 'arrival' | 'departure';
+  bufferMinutes: number;
+  preferredMode: 'any' | 'walk' | 'bus' | 'subway' | 'mixed';
+  excludedDates: string[];
   notificationEnabled: boolean;
   notificationMinutesBefore: number;
   favorite: boolean;

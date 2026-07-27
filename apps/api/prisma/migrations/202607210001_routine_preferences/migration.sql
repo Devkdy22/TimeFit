@@ -1,0 +1,5 @@
+ALTER TABLE "Routine"
+  ADD COLUMN "timeMode" TEXT NOT NULL DEFAULT 'arrival',
+  ADD COLUMN "bufferMinutes" INTEGER NOT NULL DEFAULT 0,
+  ADD COLUMN "preferredMode" TEXT NOT NULL DEFAULT 'any',
+  ADD COLUMN "excludedDates" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

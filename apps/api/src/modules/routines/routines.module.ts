@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { SafeLogger } from '../../common/logger/safe-logger.service';
+import { AppConfigService } from '../../common/config/app-config.service';
 import { PostgresIdempotencyStore } from '../../common/idempotency/postgres-idempotency.store';
 import { AuthModule } from '../auth/auth.module';
 import { NotificationsModule } from '../notifications/notifications.module';
@@ -12,6 +13,6 @@ import { RoutinesService } from './services/routines.service';
 @Module({
   imports: [AuthModule, RecommendationModule, NotificationsModule],
   controllers: [RoutinesController],
-  providers: [PostgresIdempotencyStore, RoutineIdempotencyStore, RoutinesRepository, RoutinesService, SafeLogger],
+  providers: [AppConfigService, PostgresIdempotencyStore, RoutineIdempotencyStore, RoutinesRepository, RoutinesService, SafeLogger],
 })
 export class RoutinesModule {}

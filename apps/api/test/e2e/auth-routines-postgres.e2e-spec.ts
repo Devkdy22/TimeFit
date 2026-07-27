@@ -50,6 +50,10 @@ function routinePayload() {
     destination: { name: '회사', lat: 37.4979, lng: 127.0276 },
     weekdays: [1, 2, 3, 4, 5],
     arrivalTime: '08:50',
+    timeMode: 'arrival',
+    bufferMinutes: 12,
+    preferredMode: 'subway',
+    excludedDates: ['2026-08-15T00:00:00.000Z'],
     notificationEnabled: true,
     notificationMinutesBefore: 10,
     favorite: false,
@@ -282,6 +286,20 @@ describeIfDatabase('Auth + Routines PostgreSQL E2E', () => {
     expect(createResponse.status).toBe(201);
     const routineId = createResponse.body.data.id as string;
     expect(createResponse.body.data.origin).toMatchObject({ name: '집', lat: 37.5665 });
+    expect(createResponse.body.data).toMatchObject({
+      timeMode: 'arrival',
+      bufferMinutes: 12,
+      preferredMode: 'subway',
+      excludedDates: ['2026-08-15'],
+      notificationEnabled: true,
+      notificationMinutesBefore: 10,
+    });
+    await expect(prisma.routine.findUnique({ where: { id: routineId } })).resolves.toMatchObject({
+      timeMode: 'arrival',
+      bufferMinutes: 12,
+      preferredMode: 'subway',
+      excludedDates: ['2026-08-15'],
+    });
 
     const listResponse = await api.get('/routines').set(auth);
     expect(listResponse.status).toBe(200);
@@ -550,5 +568,104 @@ describeIfDatabase('Auth + Routines PostgreSQL E2E', () => {
       .set('Idempotency-Key', randomUUID())
       .send({ title: '필드 누락' });
     expect(invalidCreate.status).toBe(400);
+
+    const invalidTimeCreate = await api
+      .post('/routines')
+      .set('Authorization', `Bearer ${owner.accessToken}`)
+      .set('Idempotency-Key', randomUUID())
+      .send({ ...routinePayload(), arrivalTime: '8:50' });
+    expect(invalidTimeCreate.status).toBe(400);
+  });
+
+  it('persists notification preferences and syncs registered push tokens', async () => {
+    const tokens = await login('notification-preferences-user');
+    const auth = { Authorization: `Bearer ${tokens.accessToken}` };
+
+    const defaultResponse = await api.get('/notifications/preferences').set(auth);
+    expect(defaultResponse.status).toBe(200);
+    expect(defaultResponse.body.data).toMatchObject({
+      notificationEnabled: true,
+      departureLeadMinutes: 5,
+      delayNotificationEnabled: true,
+      rerouteNotificationEnabled: true,
+      vibrationEnabled: true,
+    });
+
+    const updateResponse = await api.patch('/notifications/preferences').set(auth).send({
+      notificationEnabled: false,
+      departureLeadMinutes: 15,
+      delayNotificationEnabled: false,
+      rerouteNotificationEnabled: false,
+      vibrationEnabled: false,
+    });
+    expect(updateResponse.status).toBe(200);
+    expect(updateResponse.body.data).toMatchObject({
+      notificationEnabled: false,
+      departureLeadMinutes: 15,
+      delayNotificationEnabled: false,
+      rerouteNotificationEnabled: false,
+      vibrationEnabled: false,
+    });
+
+    const routineResponse = await api
+      .post('/routines')
+      .set(auth)
+      .set('Idempotency-Key', randomUUID())
+      .send(routinePayload());
+    expect(routineResponse.status).toBe(201);
+
+    const pushToken = 'ExponentPushToken[test-notification-preferences]';
+    const registerResponse = await api.post('/notifications/push-token').set(auth).send({
+      token: pushToken,
+      platform: 'android',
+    });
+    expect(registerResponse.status).toBe(201);
+    await expect(prisma.device.findFirst({ where: { userId: tokens.userId, platform: 'android' } })).resolves.toMatchObject({
+      pushToken,
+    });
+    await expect(prisma.routine.findFirst({ where: { userId: tokens.userId } })).resolves.toMatchObject({
+      expoPushToken: pushToken,
+    });
+  });
+
+  it('deletes the account and cascades owned data', async () => {
+    const tokens = await login(`account-delete-${randomUUID()}`);
+    const auth = { Authorization: `Bearer ${tokens.accessToken}` };
+
+    const routineResponse = await api
+      .post('/routines')
+      .set(auth)
+      .set('Idempotency-Key', randomUUID())
+      .send(routinePayload());
+    expect(routineResponse.status).toBe(201);
+
+    await prisma.savedPlace.create({
+      data: {
+        userId: tokens.userId,
+        label: '계정 삭제 테스트',
+        normalizedLabel: '계정 삭제 테스트',
+        address: savedPlacePayload('계정 삭제 테스트').address,
+        lat: 37.5665,
+        lng: 126.978,
+      },
+    });
+
+    const tokenResponse = await api.post('/notifications/push-token').set(auth).send({
+      token: `ExponentPushToken[account-delete-${randomUUID()}]`,
+      platform: 'android',
+    });
+    expect(tokenResponse.status).toBe(201);
+
+    const deleteResponse = await api.delete('/auth/me').set(auth);
+    expect(deleteResponse.status).toBe(200);
+    expect(deleteResponse.body.data).toEqual({ deleted: true });
+
+    await expect(prisma.user.findUnique({ where: { id: tokens.userId } })).resolves.toBeNull();
+    await expect(prisma.routine.count({ where: { userId: tokens.userId } })).resolves.toBe(0);
+    await expect(prisma.savedPlace.count({ where: { userId: tokens.userId } })).resolves.toBe(0);
+    await expect(prisma.device.count({ where: { userId: tokens.userId } })).resolves.toBe(0);
+
+    const meResponse = await api.get('/auth/me').set(auth);
+    expect(meResponse.status).toBe(401);
   });
 });
