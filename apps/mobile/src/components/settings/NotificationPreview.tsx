@@ -1,5 +1,5 @@
 import { StyleSheet, Text, View } from 'react-native';
-import { TimeyMascot } from '../app';
+import { TimeyStage } from '../timey';
 import { settingsTokens } from '../../screens/settings/tokens';
 
 interface NotificationPreviewProps {
@@ -10,7 +10,7 @@ interface NotificationPreviewProps {
 export function NotificationPreview({ title, message }: NotificationPreviewProps) {
   return (
     <View style={styles.card}>
-      <TimeyMascot size={36} expression="smile" />
+      <TimeyStage variant="routine" state="confident" animated={false} animationMode="static" />
       <View style={styles.copy}>
         <Text style={styles.title}>{title}</Text>
         <Text style={styles.message}>{message}</Text>

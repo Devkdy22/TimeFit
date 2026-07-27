@@ -7,6 +7,7 @@ import { ActivityIndicator, Linking, Platform, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AuthProvider, useAuth } from '../src/features/auth/context';
 import { CommutePlanProvider } from '../src/features/commute-state/context';
+import { PushTokenRegistration } from '../src/features/notifications/PushTokenRegistration';
 import { RoutineProvider } from '../src/features/routine/context';
 import { AppNavigationCoordinator } from '../src/navigation/routeRecovery';
 import { preloadSubwayLines } from '../src/utils/subwayLineCache';
@@ -61,6 +62,7 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
+        <PushTokenRegistration />
         <AuthGate>
           <RoutineProvider>
             <CommutePlanProvider>
@@ -80,6 +82,7 @@ export default function RootLayout() {
                 <Stack.Screen name="moving" />
                 <Stack.Screen name="test-map" />
                 {__DEV__ ? <Stack.Screen name="dev/timey-preview" /> : null}
+                {__DEV__ ? <Stack.Screen name="dev/home-timey-preview" /> : null}
                 {__DEV__ ? <Stack.Screen name="dev/timey-export" /> : null}
               </Stack>
             </CommutePlanProvider>

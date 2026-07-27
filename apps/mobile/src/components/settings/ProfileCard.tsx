@@ -1,6 +1,6 @@
 import { Ionicons } from '@expo/vector-icons';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { TimeyMascot } from '../app';
+import { TimeyStage } from '../timey';
 import { settingsTokens } from '../../screens/settings/tokens';
 
 interface ProfileCardProps {
@@ -27,7 +27,7 @@ export function ProfileCard({
       style={({ pressed }) => [styles.card, { opacity: pressed ? 0.92 : 1 }]}
     >
       <View style={styles.left}>
-        <TimeyMascot size={58} expression="smile" />
+        <TimeyStage variant="routine" state="confident" animated glow animationMode="static" />
         <View style={styles.texts}>
           <Text style={styles.name}>{name}</Text>
           <Text style={styles.email}>{email}</Text>

@@ -9,6 +9,7 @@ import {
   configureAuthSessionBridge,
   getMyAuthProfile,
   logoutAuthSession,
+  deleteMyAccount,
   redeemOAuthLoginTicket,
   refreshAuthSession,
   type AuthProfile,
@@ -51,6 +52,7 @@ interface AuthContextValue {
   cancelOAuthWarmup: () => void;
   redeemOAuthCallback: (input: OAuthCallbackInput) => Promise<OAuthCallbackRedeemResult>;
   logout: () => void;
+  deleteAccount: () => Promise<void>;
   setPendingRoutineSeed: (seed: PendingRoutineSeed | null) => void;
 }
 
@@ -794,6 +796,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (currentRefresh) {
           void logoutAuthSession(currentRefresh, currentAccess ?? undefined);
         }
+      },
+      deleteAccount: async () => {
+        await deleteMyAccount();
+        await clearLocalSession();
       },
       redeemOAuthCallback,
       cancelOAuthWarmup,

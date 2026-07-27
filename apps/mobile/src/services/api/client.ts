@@ -1,24 +1,13 @@
 import { Platform } from 'react-native';
+import { resolveApiBaseUrl as resolveConfiguredApiBaseUrl } from '../../config/apiEnvironment';
 
-function resolveApiBaseUrl() {
-  const raw =
-    process.env.EXPO_PUBLIC_API_URL ??
-    process.env.EXPO_PUBLIC_API_BASE_URL ??
-    'https://timefit-api.onrender.com';
-
-  try {
-    const parsed = new URL(raw);
-    const isLocalhost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1';
-
-    // Android emulator cannot reach host machine via localhost.
-    if (Platform.OS === 'android' && isLocalhost) {
-      parsed.hostname = '10.0.2.2';
-    }
-
-    return parsed.toString().replace(/\/$/, '');
-  } catch {
-    return 'https://timefit-api.onrender.com';
+export function resolveApiBaseUrl() {
+  const raw = resolveConfiguredApiBaseUrl();
+  const parsed = new URL(raw);
+  if (Platform.OS === 'android' && (parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1')) {
+    parsed.hostname = '10.0.2.2';
   }
+  return parsed.toString().replace(/\/$/, '');
 }
 
 export const API_BASE_URL = resolveApiBaseUrl();
@@ -100,6 +89,10 @@ export interface RoutineListItem {
   };
   weekdays: number[];
   arrivalTime: string;
+  timeMode: 'arrival' | 'departure';
+  bufferMinutes: number;
+  preferredMode: 'any' | 'walk' | 'bus' | 'subway' | 'mixed';
+  excludedDates: string[];
   notificationEnabled: boolean;
   notificationMinutesBefore: number;
   favorite: boolean;
@@ -107,6 +100,14 @@ export interface RoutineListItem {
   lastTriggeredAt?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface NotificationPreferences {
+  notificationEnabled: boolean;
+  departureLeadMinutes: number;
+  delayNotificationEnabled: boolean;
+  rerouteNotificationEnabled: boolean;
+  vibrationEnabled: boolean;
 }
 
 export interface CreateRoutineRequest {
@@ -123,6 +124,10 @@ export interface CreateRoutineRequest {
   };
   weekdays: number[];
   arrivalTime: string;
+  timeMode?: 'arrival' | 'departure';
+  bufferMinutes?: number;
+  preferredMode?: 'any' | 'walk' | 'bus' | 'subway' | 'mixed';
+  excludedDates?: string[];
   notificationEnabled?: boolean;
   notificationMinutesBefore?: number;
   favorite?: boolean;
@@ -250,7 +255,19 @@ export interface RecommendResult {
 export interface RecommendEmptyResult {
   routes: MobilityRoutePayload[];
   emptyState: {
-    code: 'ROUTE_NO_RESULT' | 'ROUTE_EMPTY_AFTER_MAPPING' | 'ROUTE_INVALID_INPUT';
+    code:
+      | 'ROUTE_NOT_FOUND'
+      | 'ROUTE_EMPTY_AFTER_MAPPING'
+      | 'ROUTE_INVALID_INPUT'
+      | 'ROUTE_PROVIDER_DOWN'
+      | 'PROVIDER_UNAVAILABLE'
+      | 'APPLICATION_ERROR';
+    status:
+      | 'ROUTE_NOT_FOUND'
+      | 'ROUTE_PROVIDER_DOWN'
+      | 'PROVIDER_UNAVAILABLE'
+      | 'APPLICATION_ERROR'
+      | 'INVALID_INPUT';
     title: string;
     description: string;
     retryable: boolean;
@@ -297,11 +314,15 @@ export interface MobilityRoutePayload {
       lng: number;
     }>;
     distanceMeters?: number;
+    realtimeStatus?: 'SCHEDULED' | 'LIVE' | 'DELAYED' | 'STALE' | 'CHECKING' | 'UNAVAILABLE';
     realtimeInfo?: {
       etaMinutes?: number;
       etaSeconds?: number;
       matchingConfidence?: number;
       trainStatusMessage?: string;
+      reasonCode?: string;
+      source?: 'SEOUL_API' | 'GYEONGGI_API' | 'INCHEON_API' | 'CACHE';
+      updatedAt?: string;
     };
     candidates?: Array<{
       route: string;
@@ -359,10 +380,12 @@ export interface TripPositionRequest {
 export interface TripPositionResult {
   currentSegmentIndex: number;
   progress: number;
+  routeProgress?: number;
   isOffRoute: boolean;
   nextAction: string;
   distanceFromRouteMeters: number;
   matchingConfidence: number;
+  matchedPoint?: { lat: number; lng: number };
   ignored?: boolean;
   reason?: string;
 }
@@ -694,7 +717,11 @@ export async function recommendRoutes(input: RecommendRequest): Promise<Recommen
       hasEmptyState: 'emptyState' in data,
     });
     if ('emptyState' in data) {
-      throw new Error(data.emptyState.description || '추천 가능한 경로가 없습니다.');
+      throw new ApiRequestError(
+        data.emptyState.description || '추천 가능한 경로가 없습니다.',
+        response.status,
+        data.emptyState.status,
+      );
     }
     recommendCache.set(cacheKey, {
       expiresAt: Date.now() + RECOMMEND_CACHE_TTL_MS,
@@ -706,15 +733,6 @@ export async function recommendRoutes(input: RecommendRequest): Promise<Recommen
   recommendInFlight.set(cacheKey, task);
   try {
     return await task;
-  } catch (error) {
-    // 호출 제한 등 일시 오류 시 직전 캐시가 있으면 폴백한다.
-    if (cached) {
-      logApi('recommendation call fallback cache used', {
-        endpoint: 'recommendations/calculate',
-      });
-      return cached.value;
-    }
-    throw error;
   } finally {
     recommendInFlight.delete(cacheKey);
   }
@@ -736,16 +754,32 @@ export async function fetchRouteCandidates(input: {
   }
   const data = await readApiEnvelope<{
     source: 'api' | 'fallback';
-    status: 'OK' | 'NO_RESULT' | 'MAPPING_FAILED' | 'PROVIDER_TIMEOUT' | 'PROVIDER_DOWN' | 'INVALID_INPUT';
+    status:
+      | 'OK'
+      | 'ROUTE_PROVIDER_DOWN'
+      | 'PROVIDER_UNAVAILABLE'
+      | 'ROUTE_NOT_FOUND'
+      | 'APPLICATION_ERROR'
+      | 'INVALID_INPUT';
     fetchedAt: string;
     cacheableForMs: number;
     candidates: MobilityRoutePayload[];
     emptyState?: {
+      status?:
+        | 'ROUTE_NOT_FOUND'
+        | 'ROUTE_PROVIDER_DOWN'
+        | 'PROVIDER_UNAVAILABLE'
+        | 'APPLICATION_ERROR'
+        | 'INVALID_INPUT';
       description?: string;
     };
   }>(response);
-  if (data.status !== 'OK' || data.candidates.length === 0) {
-    throw new Error(data.emptyState?.description || '추천 가능한 대중교통 경로가 없습니다.');
+  if (data.status !== 'OK' || data.source !== 'api' || data.candidates.length === 0) {
+    throw new ApiRequestError(
+      data.emptyState?.description || '추천 가능한 대중교통 경로가 없습니다.',
+      response.status,
+      data.status,
+    );
   }
   return data;
 }
@@ -818,6 +852,23 @@ export async function sendTripPosition(
     throw new Error(`Trip position failed: ${response.status}`);
   }
   return readApiEnvelope<TripPositionResult>(response);
+}
+
+export async function setTripAppState(
+  tripId: string,
+  appState: 'foreground' | 'background',
+): Promise<{ tripId: string; appState: 'foreground' | 'background' }> {
+  const response = await authorizedFetch(`${API_BASE_URL}/trips/${encodeURIComponent(tripId)}/app-state`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ appState }),
+  });
+  if (!response.ok) {
+    throw new Error(`Trip app state failed: ${response.status}`);
+  }
+  return readApiEnvelope<{ tripId: string; appState: 'foreground' | 'background' }>(response);
 }
 
 export async function searchKakaoKeywordViaProxy(query: string, size = 8): Promise<KakaoKeywordDocument[]> {
@@ -1080,6 +1131,14 @@ export async function logoutAuthSession(refreshToken: string, accessToken?: stri
   });
 }
 
+export async function deleteMyAccount(): Promise<void> {
+  const response = await authorizedFetch(`${API_BASE_URL}/auth/me`, {
+    method: 'DELETE',
+    authMode: 'protected',
+  });
+  if (!response.ok) throw new ApiRequestError(`Delete account failed: ${response.status}`, response.status);
+}
+
 export async function getMyAuthProfile(accessToken: string): Promise<AuthProfile> {
   const response = await authorizedFetch(`${API_BASE_URL}/auth/me`, {
     method: 'GET',
@@ -1194,6 +1253,33 @@ export async function deleteRoutine(id: string, signal?: AbortSignal): Promise<v
   if (!response.ok) {
     throw new ApiRequestError(`Delete routine failed: ${response.status}`, response.status);
   }
+}
+
+export async function registerPushToken(input: { token: string; platform: 'ios' | 'android' | 'web' }): Promise<void> {
+  const response = await authorizedFetch(`${API_BASE_URL}/notifications/push-token`, {
+    method: 'POST',
+    authMode: 'protected',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new ApiRequestError(`Register push token failed: ${response.status}`, response.status);
+}
+
+export async function getNotificationPreferences(): Promise<NotificationPreferences> {
+  const response = await authorizedFetch(`${API_BASE_URL}/notifications/preferences`, { method: 'GET', authMode: 'protected' });
+  if (!response.ok) throw new ApiRequestError(`Get notification preferences failed: ${response.status}`, response.status);
+  return readApiEnvelope<NotificationPreferences>(response);
+}
+
+export async function updateNotificationPreferences(input: Partial<NotificationPreferences>): Promise<NotificationPreferences> {
+  const response = await authorizedFetch(`${API_BASE_URL}/notifications/preferences`, {
+    method: 'PATCH',
+    authMode: 'protected',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new ApiRequestError(`Update notification preferences failed: ${response.status}`, response.status);
+  return readApiEnvelope<NotificationPreferences>(response);
 }
 
 export async function getMyPlaces(signal?: AbortSignal): Promise<SavedPlaceItem[]> {
