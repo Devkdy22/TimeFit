@@ -64,6 +64,7 @@ type AuthDbClient = {
       where: { id: string };
       data: { email: string; name?: string };
     }): Promise<AuthUserRow>;
+    delete(args: { where: { id: string } }): Promise<{ id: string }>;
   };
   authIdentity: {
     findUnique(args: {
@@ -386,6 +387,11 @@ export class AuthService {
     if (accessToken) {
       await this.revokeByAccessHash(this.hashToken(accessToken));
     }
+  }
+
+  async deleteAccount(userId: string): Promise<void> {
+    const prisma = await this.getPrismaClient();
+    await prisma.user.delete({ where: { id: userId } });
   }
 
   async getMe(accessToken: string) {

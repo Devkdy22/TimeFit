@@ -5,6 +5,7 @@ import {
   Headers,
   Param,
   Post,
+  Delete,
   Query,
   Req,
   Res,
@@ -93,6 +94,16 @@ export class AuthController {
       success: true,
       data: await this.authService.getMe(accessToken),
     };
+  }
+
+  @Delete('me')
+  @UseGuards(AuthAccessGuard)
+  async deleteMe(@Req() request: AuthenticatedRequest) {
+    if (!request.authUserId) {
+      throw new UnauthorizedException('Missing authenticated user');
+    }
+    await this.authService.deleteAccount(request.authUserId);
+    return { success: true, data: { deleted: true } };
   }
 
   private extractBearer(authorization?: string) {
